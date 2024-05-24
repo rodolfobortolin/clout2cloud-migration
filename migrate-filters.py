@@ -9,7 +9,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(m
 # Hard-coded variables
 SOURCE_BASE_URL = "https://source.atlassian.net"
 TARGET_BASE_URL = "https://target.atlassian.net"
-USERNAME = "xxxxx@gmail.com"
+USERNAME = ""
 TOKEN = ""
 
 # Authentication setup
@@ -96,39 +96,79 @@ def map_group_name_to_id(group_name, target_groups):
 def create_filter_in_target(filter_data, target_projects, target_groups):
     """Create a filter in the target instance."""
     url = f"{TARGET_BASE_URL}/rest/api/3/filter"
-    # Check if editPermissions is empty
-    edit_permissions = filter_data.get("editPermissions", [])
-    if not edit_permissions:
-        edit_permissions = [{
-            "type": "user",
-            "user": {
-                "accountId": filter_data["owner"]["accountId"]
-            }
-        }]
-    
-    # Ensure each share permission is for project or group type and includes only the type and project/group ID
+
     share_permissions = []
-    for permission in filter_data.get("sharePermissions", []):
-        if permission.get("type") == "project" and "project" in permission:
-            project_id = map_project_key_to_id(permission["project"]["key"], target_projects)
+    for permission in filter_data['sharePermissions']:
+        if permission['type'] == 'project':
+            project_id = map_project_key_to_id(permission['project']['key'], target_projects)
             if project_id:
                 share_permissions.append({
-                    "type": "project",
-                    "project": {"id": project_id}
+                    'type': 'project',
+                    'project': {'id': project_id}
                 })
             else:
                 logging.warning(f"Project '{permission['project']['key']}' not found in target instance, skipping permission.")
-        elif permission.get("type") == "group" and "group" in permission:
-            group_id = map_group_name_to_id(permission["group"]["name"], target_groups)
+        elif permission['type'] == 'group':
+            group_id = map_group_name_to_id(permission['group']['name'], target_groups)
             if group_id:
                 share_permissions.append({
-                    "type": "group",
-                    "group": {"groupId": group_id}
+                    'type': 'group',
+                    'group': {'groupId': group_id}
                 })
             else:
                 logging.warning(f"Group '{permission['group']['name']}' not found in target instance, skipping permission.")
+        elif permission['type'] == 'user':
+            if permission['user']:
+                share_permissions.append({
+                    'type': 'user',
+                    "user": {
+                        "accountId": permission['user']['accountId']
+                    }
+                })
+            else:
+                logging.warning(f"User '{permission['user']['accountId']}' not found in target instance, skipping permission.")
+        elif permission['type'] == 'loggedin':
+            share_permissions.append({
+                'type': 'authenticated'
+            })
         else:
-            logging.warning(f"Non-project/non-group share permission found, skipping: {permission}")
+            logging.warning(f"Unsupported share permission type: {permission['type']}")
+
+    # Ensure the dashboard owner has edit permissions
+    edit_permissions = []
+    for permission in filter_data['editPermissions']:
+        if permission['type'] == 'project':
+            project_id = map_project_key_to_id(permission['project']['key'], target_projects)
+            if project_id:
+                edit_permissions.append({
+                    'type': 'project',
+                    'project': {'id': project_id}
+                })
+            else:
+                logging.warning(f"Project '{permission['project']['key']}' not found in target instance, skipping permission.")
+        elif permission['type'] == 'group':
+            group_id = map_group_name_to_id(permission['group']['name'], target_groups)
+            if group_id:
+                edit_permissions.append({
+                    'type': 'group',
+                    'group': {'groupId': group_id}
+                })
+            else:
+                logging.warning(f"Group '{permission['group']['name']}' not found in target instance, skipping permission.")
+        elif permission['type'] == 'user':
+            if permission['user']:
+                edit_permissions.append({
+                    'type': 'user',
+                    "user": {
+                        "accountId": permission['user']['accountId']
+                    }
+                })
+            else:
+                logging.warning(f"User '{permission['user']['accountId']}' not found in target instance, skipping permission.")
+        else:
+            logging.warning(f"Unsupported edot permission type: {permission['type']}")
+
+    #filter_data["owner"]["accountId"]
 
     payload = {
         "name": filter_data["name"],
@@ -138,6 +178,20 @@ def create_filter_in_target(filter_data, target_projects, target_groups):
         "editPermissions": edit_permissions
     }
     response = requests.post(url, headers=headers, auth=auth, data=json.dumps(payload))
+
+    if response.status_code == 201:
+        filter_id = response.json()['id']
+        owner_url = f"{TARGET_BASE_URL}/rest/api/3/filter/{filter_id}/owner"
+        owner_payload = json.dumps({"accountId": permission['owner']['accountId']})
+
+        owner_response = requests.put(owner_url, headers=headers, auth=auth, data=owner_payload)
+        if owner_response.status_code == 200:
+            logging.info(f"Filter owner changed successfully for filter ID {filter_id}")
+        else:
+            logging.error(f"Failed to change filter owner for filter ID {filter_id}: {owner_response.text}")
+    else:
+        logging.error(f"Failed to create filter: {response.text}")
+
     return response
 
 def update_filter_owner(filter_id, new_owner):
