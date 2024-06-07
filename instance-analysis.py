@@ -117,7 +117,7 @@ def add_projects_section(doc, source_data, target_data):
     doc.add_paragraph(f"• Number of projects in source instance: {source_count}")
     doc.add_paragraph(f"• Number of projects in target instance: {target_count}")
 
-    doc.add_heading('Analysis of what will be added to the target instance', level=2)
+    doc.add_heading('Items to be added to the target instance', level=2)
     if additions:
         table = doc.add_table(rows=1, cols=2)
         table.style = 'Table Grid'
@@ -129,10 +129,10 @@ def add_projects_section(doc, source_data, target_data):
             row_cells[0].text = addition_key
             row_cells[1].text = addition_description
     else:
-        doc.add_paragraph("We didn't identify anything that will be added.")
+        doc.add_paragraph("No items identified for addition.")
 
     if conflicts:
-        doc.add_heading('These project keys have conflicts and will need to be renamed in the source or target instance in order to be migrated.', level=2)
+        doc.add_heading('Conflicting project keys requiring renaming for migration', level=2)
         table = doc.add_table(rows=1, cols=2)
         table.style = 'Table Grid'
         hdr_cells = table.rows[0].cells
@@ -166,13 +166,13 @@ def add_filters_section(doc, source_data, target_data):
     doc.add_paragraph(f"• Number of filters in source instance: {source_count}")
     doc.add_paragraph(f"• Number of filters in target instance: {target_count}")
 
-    doc.add_heading('Filters that have conflicts (same name in the source and target):', level=2)
+    doc.add_heading('Conflicting filters (same name in both instances)', level=2)
     conflicts = [item['name'] for item in source_data if item['name'] in [i['name'] for i in target_data]]
     if conflicts:
         for conflict in conflicts:
             doc.add_paragraph(f"• {conflict}")
     else:
-        doc.add_paragraph("No conflicts were identified regarding filters during the assessment.")
+        doc.add_paragraph("No conflicts identified for filters.")
 
 def add_dashboards_section(doc, source_data, target_data):
     source_count = len(source_data)
@@ -185,19 +185,19 @@ def add_dashboards_section(doc, source_data, target_data):
     doc.add_paragraph(f"• Number of dashboards in source instance: {source_count}")
     doc.add_paragraph(f"• Number of dashboards in target instance: {target_count}")
 
-    doc.add_heading('Dashboards that have conflicts (same name in the source and target):', level=2)
+    doc.add_heading('Conflicting dashboards (same name in both instances)', level=2)
     conflicts = [item['name'] for item in source_data if item['name'] in [i['name'] for i in target_data]]
     if conflicts:
         for conflict in conflicts:
             doc.add_paragraph(f"• {conflict}")
     else:
-        doc.add_paragraph("No conflicts were identified regarding Dashboards during the assessment.")
+        doc.add_paragraph("No conflicts identified for dashboards.")
 
     doc.add_heading('Limitations', level=2)
-    doc.add_paragraph("Since the migration of dashboards is done through REST API, our limitation is directly tied to the lack of necessary APIs for the migration. Currently, for dashboards, we have identified the following limitations:")
-    doc.add_paragraph("• Inability to migrate the layout of the dashboards")
-    doc.add_paragraph("• Inability to migrate the owner of the dashboard. To work around this limitation, we add the owner as an editor of the dashboard, but the owner will be the user running the script.")
-    doc.add_paragraph("• Favorite dashboards of each user will be lost, requiring each user to find their dashboard in the destination instance and set it as a favorite again.")
+    doc.add_paragraph("Due to the limitations of the REST API, the following restrictions apply to dashboard migration:")
+    doc.add_paragraph("• Unable to migrate dashboard layouts.")
+    doc.add_paragraph("• Unable to migrate dashboard ownership. The script will set the user running the script as the owner, and add the original owner as an editor.")
+    doc.add_paragraph("• User favorite dashboards will not be retained. Users will need to manually set their favorites in the new instance.")
 
 # Special handling for custom fields to match the required format
 def add_custom_fields_section(doc, source_data, target_data):
@@ -218,7 +218,7 @@ def add_custom_fields_section(doc, source_data, target_data):
     target_fields = {field['name']: get_field_type(field) for field in target_data}
 
     # Additions table
-    doc.add_heading('Custom fields that will be added', level=2)
+    doc.add_heading('Custom fields to be added', level=2)
     additions = {name: source_type for name, source_type in source_fields.items() if name not in target_fields and source_type not in non_migratable_types}
     if additions:
         table = doc.add_table(rows=1, cols=2)
@@ -231,29 +231,26 @@ def add_custom_fields_section(doc, source_data, target_data):
             row_cells[0].text = name
             row_cells[1].text = source_type
     else:
-        doc.add_paragraph("No custom fields will be added.")
+        doc.add_paragraph("No custom fields identified for addition.")
 
     # Merges table
-    doc.add_heading('Custom fields with the same name on both instances', level=2)
+    doc.add_heading('Custom fields with identical names in both instances', level=2)
     merges = {name: source_type for name, source_type in source_fields.items() if name in target_fields and source_type != target_fields[name]}
     if merges:
-        table = doc.add_table(rows=1, cols=4)
+        table = doc.add_table(rows=1, cols=3)
         table.style = 'Table Grid'
         hdr_cells = table.rows[0].cells
         hdr_cells[0].text = 'Name'
         hdr_cells[1].text = 'Source Type'
         hdr_cells[2].text = 'Target Type'
-        hdr_cells[3].text = 'Suggestion'
         for name, source_type in merges.items():
             target_type = target_fields.get(name, 'N/A')
-            suggestion = 'Rename source/target or Merge or Delete'
             row_cells = table.add_row().cells
             row_cells[0].text = name
             row_cells[1].text = source_type
             row_cells[2].text = target_type
-            row_cells[3].text = suggestion
     else:
-        doc.add_paragraph("No custom fields have the same name on both instances with different types.")
+        doc.add_paragraph("No custom fields with identical names found in both instances with differing types.")
 
     # Non-migratable fields table
     doc.add_heading('Custom fields that will not be migrated', level=2)
@@ -269,7 +266,7 @@ def add_custom_fields_section(doc, source_data, target_data):
             row_cells[0].text = name
             row_cells[1].text = source_type
     else:
-        doc.add_paragraph("No custom fields will not be migrated.")
+        doc.add_paragraph("No custom fields identified for exclusion from migration.")
 
 # Special handling for statuses to only include ones with same name but different status categories
 def add_statuses_section(doc, source_data, target_data):
@@ -282,7 +279,7 @@ def add_statuses_section(doc, source_data, target_data):
     doc.add_paragraph(f"• Number of statuses in target instance: {target_count}")
 
     # Additions table
-    doc.add_heading('Statuses that will be added', level=2)
+    doc.add_heading('Statuses to be added', level=2)
     additions = analyze_additions({status['name']: status['statusCategory']['name'] for status in source_data}, {status['name']: status['statusCategory']['name'] for status in target_data})
     if additions:
         table = doc.add_table(rows=1, cols=2)
@@ -295,10 +292,10 @@ def add_statuses_section(doc, source_data, target_data):
             row_cells[0].text = addition_name
             row_cells[1].text = addition_category
     else:
-        doc.add_paragraph("No statuses will be added.")
+        doc.add_paragraph("No statuses identified for addition.")
 
     # Conflicts table
-    doc.add_heading('Statuses with the same name but different categories', level=2)
+    doc.add_heading('Statuses with identical names but different categories', level=2)
     source_statuses = {status['name']: status['statusCategory']['name'] for status in source_data}
     target_statuses = {status['name']: status['statusCategory']['name'] for status in target_data}
     conflicts = {name: source_category for name, source_category in source_statuses.items() if name in target_statuses and source_category != target_statuses[name]}
@@ -319,7 +316,7 @@ def add_statuses_section(doc, source_data, target_data):
             row_cells[2].text = target_category
             row_cells[3].text = suggestion
     else:
-        doc.add_paragraph("No statuses have the same name but different categories.")
+        doc.add_paragraph("No statuses with identical names found but differing categories.")
 
 # Function to analyze and add sections for all required entities
 def analyze_and_add_section(doc, title, source_data, target_data, key_attr):
@@ -336,7 +333,7 @@ def analyze_and_add_section(doc, title, source_data, target_data, key_attr):
     doc.add_paragraph(f"• Number of {title.lower()} in source instance: {source_count}")
     doc.add_paragraph(f"• Number of {title.lower()} in target instance: {target_count}")
 
-    doc.add_heading('Analysis of what will be added to the target instance', level=2)
+    doc.add_heading('Items to be added to the target instance', level=2)
     if additions:
         table = doc.add_table(rows=1, cols=2)
         table.style = 'Table Grid'
@@ -348,9 +345,9 @@ def analyze_and_add_section(doc, title, source_data, target_data, key_attr):
             row_cells[0].text = addition_name
             row_cells[1].text = addition_description
     else:
-        doc.add_paragraph("We didn't identify anything that will be added.")
+        doc.add_paragraph("No items identified for addition.")
 
-    doc.add_heading('What will be merged (because they are on both instances)', level=2)
+    doc.add_heading('Items to be merged due to presence in both instances', level=2)
     table = doc.add_table(rows=1, cols=2)
     table.style = 'Table Grid'
     hdr_cells = table.rows[0].cells
