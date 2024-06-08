@@ -22,6 +22,40 @@ target_config = {
     'base_url': 'https://target.atlassian.net'
 }
 
+def get_group_members(config, group_name):
+    start_at = 0
+    max_results = 50
+    members = []
+
+    while True:
+        url = f"{config['base_url']}/rest/api/2/group/member?groupname={group_name}&startAt={start_at}&maxResults={max_results}"
+        auth = HTTPBasicAuth(config['email'], config['token'])
+        headers = {"Accept": "application/json"}
+        
+        response = requests.get(url, auth=auth, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        members.extend(data.get('values', []))
+
+        if data.get('isLast', True):
+            break
+
+        start_at += max_results
+
+    return members
+
+def get_all_users_by_license(application_roles, config):
+    users_by_license = defaultdict(set)
+    
+    for role in application_roles:
+        for group in role['groups']:
+            members = get_group_members(config, group)
+            for member in members:
+                if 'emailAddress' in member:
+                    users_by_license[role['name']].add(member['emailAddress'])
+    
+    return users_by_license
+
 # Function to get data from Jira instance with progress bar
 def get_jira_data(config, endpoint, desc='Fetching data'):
     url = f"{config['base_url']}{endpoint}"
@@ -117,6 +151,18 @@ endpoints = {
     'dashboards': '/rest/api/2/dashboard/search'
 }
 
+# Function to get application roles
+def get_application_roles(config):
+    url = f"{config['base_url']}/rest/api/2/applicationrole"
+    auth = HTTPBasicAuth(config['email'], config['token'])
+    headers = {"Accept": "application/json"}
+    
+    with tqdm(total=1, desc="Fetching application roles", ncols=100) as pbar:
+        response = requests.get(url, auth=auth, headers=headers)
+        pbar.update(1)
+        response.raise_for_status()
+        return response.json()
+
 # Fetch data from both instances with progress bars
 data_source = {key: get_jira_data(source_config, endpoint, f"Fetching {key} from source") for key, endpoint in endpoints.items()}
 data_target = {key: get_jira_data(target_config, endpoint, f"Fetching {key} from target") for key, endpoint in endpoints.items()}
@@ -130,6 +176,10 @@ data_target['dashboards'] = search_dashboards(target_config, 'Fetching dashboard
 # Fetch notification schemes with pagination and progress bars
 notification_schemes_source = get_notification_schemes(source_config, 'Fetching notification schemes from source')
 notification_schemes_target = get_notification_schemes(target_config, 'Fetching notification schemes from target')
+
+# Fetch application roles (licenses)
+application_roles_source = get_application_roles(source_config)
+application_roles_target = get_application_roles(target_config)
 
 # Create a new Document
 doc = Document()
@@ -433,6 +483,69 @@ def add_notification_schemes_section(doc, source_schemes, target_schemes, projec
     doc.add_heading('Migration Note', level=2)
     doc.add_paragraph("All notification schemes from the source instance will be mapped to the default notification scheme in the target instance.")
 
+def add_licenses_section(doc, source_application_roles, target_application_roles, source_config, target_config):
+    doc.add_heading('Licenses', level=1)
+    
+    def add_table(doc, application_roles, heading):
+        if application_roles:
+            doc.add_heading(heading, level=2)
+            table = doc.add_table(rows=1, cols=6)
+            table.style = 'Table Grid'
+            hdr_cells = table.rows[0].cells
+            hdr_cells[0].text = 'Application'
+            hdr_cells[1].text = 'Number of Seats'
+            hdr_cells[2].text = 'Remaining Seats'
+            hdr_cells[3].text = 'User Count'
+            hdr_cells[4].text = 'Default Groups'
+            hdr_cells[5].text = 'All Groups'
+            
+            for role in application_roles:
+                row_cells = table.add_row().cells
+                row_cells[0].text = role['name']
+                row_cells[1].text = str(role['numberOfSeats'])
+                row_cells[2].text = str(role['remainingSeats'])
+                row_cells[3].text = f"{role['userCount']} ({role['userCountDescription']})"
+                row_cells[4].text = ', '.join(role['defaultGroups'])
+                row_cells[5].text = ', '.join(role['groups'])
+        else:
+            doc.add_paragraph(f"No licenses found in {heading.lower()}.")
+
+    add_table(doc, source_application_roles, "Source Instance")
+    add_table(doc, target_application_roles, "Target Instance")
+
+    # Get all users by license for source and target instances
+    source_users_by_license = get_all_users_by_license(source_application_roles, source_config)
+    target_users_by_license = get_all_users_by_license(target_application_roles, target_config)
+
+    # Find common users in both instances
+    common_users = {}
+    for license_type, source_users in source_users_by_license.items():
+        if license_type in target_users_by_license:
+            target_users = target_users_by_license[license_type]
+            common_users[license_type] = source_users & target_users
+
+    # Create table for common users
+    doc.add_heading('Common Users and License Savings', level=1)
+    if common_users:
+        table = doc.add_table(rows=1, cols=3)
+        table.style = 'Table Grid'
+        hdr_cells = table.rows[0].cells
+        hdr_cells[0].text = 'License Type'
+        hdr_cells[1].text = 'User'
+        hdr_cells[2].text = 'Savings'
+
+        for license_type, users in common_users.items():
+            for user in users:
+                row_cells = table.add_row().cells
+                row_cells[0].text = license_type
+                row_cells[1].text = user
+                row_cells[2].text = '1 License'  # Since merging will save one license per user
+
+        total_savings = sum(len(users) for users in common_users.values())
+        doc.add_paragraph(f"Total Savings: {total_savings} licenses")
+    else:
+        doc.add_paragraph("No common users found that would save licenses.")
+
 # Function to analyze and add sections for all required entities
 def analyze_and_add_section(doc, title, source_data, target_data, key_attr):
     source_count = len(source_data)
@@ -516,6 +629,12 @@ try:
     add_notification_schemes_section(doc, notification_schemes_source, notification_schemes_target, data_source['projects'], source_config)
 except Exception as e:
     logging.error(f"Failed to analyze notification schemes: {e}")
+
+# Special handling for licenses with error handling
+try:
+    add_licenses_section(doc, application_roles_source, application_roles_target, source_config, target_config)
+except Exception as e:
+    logging.error(f"Failed to analyze licenses: {e}")
 
 # Save the document
 doc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jira_analysis.docx')
