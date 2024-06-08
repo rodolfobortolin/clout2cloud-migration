@@ -4,6 +4,7 @@ from requests.auth import HTTPBasicAuth
 import logging
 from collections import defaultdict
 from docx import Document
+from tqdm import tqdm  # Import the tqdm library for progress bars
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
@@ -21,62 +22,79 @@ target_config = {
     'base_url': 'https://target.atlassian.net'
 }
 
-# Function to get data from Jira instance
-def get_jira_data(config, endpoint):
+# Function to get data from Jira instance with progress bar
+def get_jira_data(config, endpoint, desc='Fetching data'):
     url = f"{config['base_url']}{endpoint}"
     auth = HTTPBasicAuth(config['email'], config['token'])
     headers = {"Accept": "application/json"}
     
-    response = requests.get(url, auth=auth, headers=headers)
-    response.raise_for_status()
-    return response.json()
+    with tqdm(total=1, desc=desc, ncols=100) as pbar:
+        response = requests.get(url, auth=auth, headers=headers)
+        pbar.update(1)
+        response.raise_for_status()
+        return response.json()
 
-# Function to search filters with pagination
-def search_filters(config):
+# Function to search filters with pagination and progress bar
+def search_filters(config, desc='Fetching filters'):
     filters = []
     start_at = 0
     max_results = 50
-    while True:
-        url = f"{config['base_url']}/rest/api/2/filter/search?expand=description,owner,jql,sharePermissions,editPermissions&startAt={start_at}&maxResults={max_results}"
-        response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
-        response.raise_for_status()
-        data = response.json()
-        filters.extend(data.get('values', []))
-        if data.get('isLast', True):
-            break
-        start_at += max_results
+    total = 1
+    with tqdm(total=total, desc=desc, ncols=100) as pbar:
+        while True:
+            url = f"{config['base_url']}/rest/api/2/filter/search?expand=description,owner,jql,sharePermissions,editPermissions&startAt={start_at}&maxResults={max_results}"
+            response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
+            response.raise_for_status()
+            data = response.json()
+            filters.extend(data.get('values', []))
+            if data.get('isLast', True):
+                break
+            start_at += max_results
+            total = data.get('total', total)
+            pbar.total = total
+            pbar.update(max_results)
     return filters
 
-# Function to search dashboards with pagination
-def search_dashboards(config):
+# Function to search dashboards with pagination and progress bar
+def search_dashboards(config, desc='Fetching dashboards'):
     dashboards = []
     start_at = 0
     max_results = 50
-    while True:
-        url = f"{config['base_url']}/rest/api/2/dashboard?startAt={start_at}&maxResults={max_results}"
-        response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
-        response.raise_for_status()
-        data = response.json()
-        dashboards.extend(data.get('dashboards', []))
-        if data.get('isLast', True):
-            break
-        start_at += max_results
+    total = 1
+    with tqdm(total=total, desc=desc, ncols=100) as pbar:
+        while True:
+            url = f"{config['base_url']}/rest/api/2/dashboard?startAt={start_at}&maxResults={max_results}"
+            response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
+            response.raise_for_status()
+            data = response.json()
+            dashboards.extend(data.get('dashboards', []))
+            if data.get('isLast', True):
+                break
+            start_at += max_results
+            total = data.get('total', total)
+            pbar.total = total
+            pbar.update(max_results)
     return [dashboard for dashboard in dashboards if dashboard['name'] != 'Default dashboard']
 
-# Function to get notification schemes with pagination
-def get_notification_schemes(config):
+# Function to get notification schemes with pagination and progress bar
+def get_notification_schemes(config, desc='Fetching notification schemes'):
     notification_schemes = []
     start_at = 0
     max_results = 50
-    while True:
-        url = f"{config['base_url']}/rest/api/2/notificationscheme/project?startAt={start_at}&maxResults={max_results}"
-        response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
-        response.raise_for_status()
-        data = response.json()
-        notification_schemes.extend(data.get('values', []))
-        if data.get('isLast', True):
-            break
-        start_at += max_results
+    total = 1
+    with tqdm(total=total, desc=desc, ncols=100) as pbar:
+        while True:
+            url = f"{config['base_url']}/rest/api/2/notificationscheme/project?startAt={start_at}&maxResults={max_results}"
+            response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
+            response.raise_for_status()
+            data = response.json()
+            notification_schemes.extend(data.get('values', []))
+            if data.get('isLast', True):
+                break
+            start_at += max_results
+            total = data.get('total', total)
+            pbar.total = total
+            pbar.update(max_results)
     return notification_schemes
 
 # Function to get notification scheme name
@@ -99,19 +117,19 @@ endpoints = {
     'dashboards': '/rest/api/2/dashboard/search'
 }
 
-# Fetch data from both instances
-data_source = {key: get_jira_data(source_config, endpoint) for key, endpoint in endpoints.items()}
-data_target = {key: get_jira_data(target_config, endpoint) for key, endpoint in endpoints.items()}
+# Fetch data from both instances with progress bars
+data_source = {key: get_jira_data(source_config, endpoint, f"Fetching {key} from source") for key, endpoint in endpoints.items()}
+data_target = {key: get_jira_data(target_config, endpoint, f"Fetching {key} from target") for key, endpoint in endpoints.items()}
 
-# Fetch filters and dashboards with pagination
-data_source['filters'] = search_filters(source_config)
-data_target['filters'] = search_filters(target_config)
-data_source['dashboards'] = search_dashboards(source_config)
-data_target['dashboards'] = search_dashboards(target_config)
+# Fetch filters and dashboards with pagination and progress bars
+data_source['filters'] = search_filters(source_config, 'Fetching filters from source')
+data_target['filters'] = search_filters(target_config, 'Fetching filters from target')
+data_source['dashboards'] = search_dashboards(source_config, 'Fetching dashboards from source')
+data_target['dashboards'] = search_dashboards(target_config, 'Fetching dashboards from target')
 
-# Fetch notification schemes with pagination
-notification_schemes_source = get_notification_schemes(source_config)
-notification_schemes_target = get_notification_schemes(target_config)
+# Fetch notification schemes with pagination and progress bars
+notification_schemes_source = get_notification_schemes(source_config, 'Fetching notification schemes from source')
+notification_schemes_target = get_notification_schemes(target_config, 'Fetching notification schemes from target')
 
 # Create a new Document
 doc = Document()
