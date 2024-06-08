@@ -20,7 +20,8 @@ paths = {
     'global_permissions': '/secure/admin/GlobalPermissions!default.jspa',
     'time_tracking': '/secure/admin/TimeTrackingAdmin.jspa',
     'plans_permissions': '/jira/plans/settings/permissions',
-    'issue_hierarchy': '/jira/settings/issues/issue-hierarchy'
+    'issue_hierarchy': '/jira/settings/issues/issue-hierarchy',
+    'plans_dependency': '/jira/plans/settings/dependencies'  # Assuming this is the correct path for plans dependency settings
 }
 
 # Initialize WebDriver (Make sure to have the ChromeDriver in your PATH)
@@ -180,6 +181,13 @@ add_screenshot_to_doc(doc, 'Source Issue Hierarchy Settings', 'source_issue_hier
 
 take_screenshot_of_div(base_urls['target'], paths['issue_hierarchy'], 'ak-main-content', 'target_issue_hierarchy.png', By.ID)
 add_screenshot_to_doc(doc, 'Target Issue Hierarchy Settings', 'target_issue_hierarchy.png')
+
+# Take screenshot of the plans dependency settings page and add it to the document
+take_screenshot_of_div(base_urls['source'], paths['plans_dependency'], 'ak-main-content', 'source_plans_dependency.png', By.ID)
+add_screenshot_to_doc(doc, 'Source Plans Dependency Settings', 'source_plans_dependency.png')
+
+take_screenshot_of_div(base_urls['target'], paths['plans_dependency'], 'ak-main-content', 'target_plans_dependency.png', By.ID)
+add_screenshot_to_doc(doc, 'Target Plans Dependency Settings', 'target_plans_dependency.png')
 
 # Save the document
 doc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jira_permissions.docx')
