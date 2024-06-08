@@ -2,6 +2,7 @@ import os
 import requests
 from requests.auth import HTTPBasicAuth
 import logging
+from collections import defaultdict
 from docx import Document
 
 # Configure logging
@@ -62,6 +63,29 @@ def search_dashboards(config):
         start_at += max_results
     return [dashboard for dashboard in dashboards if dashboard['name'] != 'Default dashboard']
 
+# Function to get notification schemes with pagination
+def get_notification_schemes(config):
+    notification_schemes = []
+    start_at = 0
+    max_results = 50
+    while True:
+        url = f"{config['base_url']}/rest/api/2/notificationscheme/project?startAt={start_at}&maxResults={max_results}"
+        response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
+        response.raise_for_status()
+        data = response.json()
+        notification_schemes.extend(data.get('values', []))
+        if data.get('isLast', True):
+            break
+        start_at += max_results
+    return notification_schemes
+
+# Function to get notification scheme name
+def get_notification_scheme_name(config, scheme_id):
+    url = f"{config['base_url']}/rest/api/2/notificationscheme/{scheme_id}"
+    response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
+    response.raise_for_status()
+    return response.json().get('name')
+
 # Define endpoints for required data
 endpoints = {
     'projects': '/rest/api/3/project',
@@ -84,6 +108,10 @@ data_source['filters'] = search_filters(source_config)
 data_target['filters'] = search_filters(target_config)
 data_source['dashboards'] = search_dashboards(source_config)
 data_target['dashboards'] = search_dashboards(target_config)
+
+# Fetch notification schemes with pagination
+notification_schemes_source = get_notification_schemes(source_config)
+notification_schemes_target = get_notification_schemes(target_config)
 
 # Create a new Document
 doc = Document()
@@ -354,6 +382,39 @@ def add_statuses_section(doc, source_data, target_data):
     else:
         doc.add_paragraph("No statuses with identical names found but differing categories.")
 
+def add_notification_schemes_section(doc, source_schemes, target_schemes, projects_data, config):
+    doc.add_heading('Notification Schemes', level=1)
+
+    # Aggregate projects under the same notification scheme
+    scheme_to_projects = defaultdict(list)
+    for scheme in source_schemes:
+        scheme_name = get_notification_scheme_name(config, scheme['notificationSchemeId'])
+        project_name = next((project['name'] for project in projects_data if project['id'] == scheme['projectId']), 'Unknown Project')
+        scheme_to_projects[scheme_name].append(project_name)
+
+    source_count = len(scheme_to_projects)
+    target_count = len({get_notification_scheme_name(config, scheme['notificationSchemeId']) for scheme in target_schemes})
+
+    doc.add_paragraph(f"• Number of notification schemes in source instance: {source_count}")
+    doc.add_paragraph(f"• Number of notification schemes in target instance: {target_count}")
+
+    doc.add_heading('Notification Schemes and Associated Projects', level=2)
+    if scheme_to_projects:
+        table = doc.add_table(rows=1, cols=2)
+        table.style = 'Table Grid'
+        hdr_cells = table.rows[0].cells
+        hdr_cells[0].text = 'Notification Scheme'
+        hdr_cells[1].text = 'Project(s)'
+        for scheme_name, projects in scheme_to_projects.items():
+            row_cells = table.add_row().cells
+            row_cells[0].text = scheme_name
+            row_cells[1].text = ', '.join(projects)
+    else:
+        doc.add_paragraph("No notification schemes identified in the source instance.")
+    
+    doc.add_heading('Migration Note', level=2)
+    doc.add_paragraph("All notification schemes from the source instance will be mapped to the default notification scheme in the target instance.")
+
 # Function to analyze and add sections for all required entities
 def analyze_and_add_section(doc, title, source_data, target_data, key_attr):
     source_count = len(source_data)
@@ -432,8 +493,13 @@ try:
 except Exception as e:
     logging.error(f"Failed to analyze statuses: {e}")
 
+# Special handling for notification schemes with error handling
+try:
+    add_notification_schemes_section(doc, notification_schemes_source, notification_schemes_target, data_source['projects'], source_config)
+except Exception as e:
+    logging.error(f"Failed to analyze notification schemes: {e}")
+
 # Save the document
 doc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jira_analysis.docx')
 doc.save(doc_path)
 logging.info(f"Document saved to {doc_path}")
-
