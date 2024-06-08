@@ -499,7 +499,15 @@ def add_licenses_section(doc, source_application_roles, target_application_roles
             hdr_cells[4].text = 'Default Groups'
             hdr_cells[5].text = 'All Groups'
             
+            total_seats = 0
+            total_remaining_seats = 0
+            total_user_count = 0
+            
             for role in application_roles:
+                total_seats += role['numberOfSeats']
+                total_remaining_seats += role['remainingSeats']
+                total_user_count += role['userCount']
+                
                 row_cells = table.add_row().cells
                 row_cells[0].text = role['name']
                 row_cells[1].text = str(role['numberOfSeats'])
@@ -507,6 +515,10 @@ def add_licenses_section(doc, source_application_roles, target_application_roles
                 row_cells[3].text = f"{role['userCount']} ({role['userCountDescription']})"
                 row_cells[4].text = ', '.join(role['defaultGroups'])
                 row_cells[5].text = ', '.join(role['groups'])
+
+            doc.add_paragraph(f"Total number of seats: {total_seats}")
+            doc.add_paragraph(f"Total remaining seats: {total_remaining_seats}")
+            doc.add_paragraph(f"Total user count: {total_user_count}")
         else:
             doc.add_paragraph(f"No licenses found in {heading.lower()}.")
 
@@ -545,6 +557,44 @@ def add_licenses_section(doc, source_application_roles, target_application_roles
         doc.add_paragraph(f"Total Savings: {total_savings} licenses")
     else:
         doc.add_paragraph("No common users found that would save licenses.")
+    
+    # Mention email domains that will be added (if any)
+    doc.add_heading('Domains to be Added', level=1)
+    source_domains = set(user.split('@')[-1] for users in source_users_by_license.values() for user in users)
+    target_domains = set(user.split('@')[-1] for users in target_users_by_license.values() for user in users)
+    new_domains = source_domains - target_domains
+
+    if new_domains:
+        doc.add_paragraph("The following domains will be added:")
+        for domain in new_domains:
+            doc.add_paragraph(domain)
+    else:
+        doc.add_paragraph("No new domains will be added.")
+
+    # Calculate remaining seats if all users are transferred from source to target
+    doc.add_heading('Remaining Seats After Transfer', level=1)
+    table = doc.add_table(rows=1, cols=4)
+    table.style = 'Table Grid'
+    hdr_cells = table.rows[0].cells
+    hdr_cells[0].text = 'License Type'
+    hdr_cells[1].text = 'Total Users in Source'
+    hdr_cells[2].text = 'Total Users in Target'
+    hdr_cells[3].text = 'Remaining Seats After Transfer'
+
+    for license_type, source_users in source_users_by_license.items():
+        if license_type in target_users_by_license:
+            target_users = target_users_by_license[license_type]
+            common_users = source_users & target_users
+            unique_source_users = source_users - common_users
+            total_users_after_transfer = len(unique_source_users) + len(target_users)
+            target_role = next(role for role in target_application_roles if role['name'] == license_type)
+            remaining_seats_after_transfer = target_role['numberOfSeats'] - total_users_after_transfer
+
+            row_cells = table.add_row().cells
+            row_cells[0].text = license_type
+            row_cells[1].text = str(len(source_users))
+            row_cells[2].text = str(len(target_users))
+            row_cells[3].text = str(remaining_seats_after_transfer)
 
 # Function to analyze and add sections for all required entities
 def analyze_and_add_section(doc, title, source_data, target_data, key_attr):
