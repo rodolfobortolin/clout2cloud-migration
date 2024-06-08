@@ -150,7 +150,43 @@ def add_resolutions_section(doc, source_data, target_data):
     analyze_and_add_section(doc, 'Resolutions', source_data, target_data, 'name')
 
 def add_roles_section(doc, source_data, target_data):
-    analyze_and_add_section(doc, 'Project Roles', source_data, target_data, 'name')
+    source_roles = {role['name']: role.get('description', 'No description') for role in source_data}
+    target_roles = {role['name']: role.get('description', 'No description') for role in target_data}
+
+    additions = analyze_additions(source_roles, target_roles)
+    merges = analyze_merges(source_roles, target_roles)
+
+    doc.add_heading('Project Roles', level=1)
+    doc.add_paragraph(f"• Number of project roles in source instance: {len(source_roles)}")
+    doc.add_paragraph(f"• Number of project roles in target instance: {len(target_roles)}")
+
+    doc.add_heading('Roles to be added to the target instance', level=2)
+    if additions:
+        table = doc.add_table(rows=1, cols=2)
+        table.style = 'Table Grid'
+        hdr_cells = table.rows[0].cells
+        hdr_cells[0].text = 'Name'
+        hdr_cells[1].text = 'Description'
+        for addition_name, addition_description in additions.items():
+            row_cells = table.add_row().cells
+            row_cells[0].text = addition_name
+            row_cells[1].text = addition_description
+    else:
+        doc.add_paragraph("No roles identified for addition.")
+
+    doc.add_heading('Roles to be merged due to presence in both instances', level=2)
+    if merges:
+        table = doc.add_table(rows=1, cols=2)
+        table.style = 'Table Grid'
+        hdr_cells = table.rows[0].cells
+        hdr_cells[0].text = 'Name'
+        hdr_cells[1].text = 'Description'
+        for merge_name, merge_description in merges.items():
+            row_cells = table.add_row().cells
+            row_cells[0].text = merge_name
+            row_cells[1].text = merge_description
+    else:
+        doc.add_paragraph("No roles identified for merging.")
 
 def add_issuetypes_section(doc, source_data, target_data):
     analyze_and_add_section(doc, 'Issue Types', source_data, target_data, 'name')
@@ -365,7 +401,8 @@ sections = [
     ('Resolutions', 'resolutions', 'name'),
     ('Issue Types', 'issuetypes', 'name'),
     ('Filters', 'filters', 'name'),
-    ('Dashboards', 'dashboards', 'name')
+    ('Dashboards', 'dashboards', 'name'),
+    ('Project Roles', 'roles', 'name')
 ]
 
 for title, key, attr in sections:
@@ -376,6 +413,8 @@ for title, key, attr in sections:
             add_filters_section(doc, data_source[key], data_target[key])
         elif title == 'Dashboards':
             add_dashboards_section(doc, data_source[key], data_target[key])
+        elif title == 'Project Roles':
+            add_roles_section(doc, data_source[key], data_target[key])
         else:
             analyze_and_add_section(doc, title, data_source[key], data_target[key], attr)
     except Exception as e:
@@ -397,3 +436,4 @@ except Exception as e:
 doc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jira_analysis.docx')
 doc.save(doc_path)
 logging.info(f"Document saved to {doc_path}")
+
