@@ -5,14 +5,15 @@ from selenium.webdriver.common.by import By
 from docx import Document
 from docx.shared import Inches
 import logging
+from tqdm import tqdm
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
 
 # Base URLs for the Jira instances
 base_urls = {
-    'source': 'https://source.atlassian.net',
-    'target': 'https://target.atlassian.net'
+    'source': 'https://southtech.atlassian.net',
+    'target': 'https://bortolin.atlassian.net'
 }
 
 # Paths for the Jira pages
@@ -136,63 +137,90 @@ def add_screenshot_to_doc(doc, title, filename):
 # Create a new Document
 doc = Document()
 
-# Manual login for the source instance
-manual_login(base_urls['source'])
+# Define the steps for progress tracking
+steps = [
+    "Manual login for the source instance",
+    "Extract global permissions from source",
+    "Manual login for the target instance",
+    "Extract global permissions from target",
+    "Compare permissions and document",
+    "Take screenshots of Time Tracking settings",
+    "Extract and compare plans permissions",
+    "Take screenshots of issue hierarchy",
+    "Take screenshots of plans dependency settings",
+    "Save document"
+]
 
-# Extract and add permissions from the source instance
-navigate_to_page(base_urls['source'], paths['global_permissions'])
-source_permissions = extract_permissions()
+# Create a progress bar
+with tqdm(total=len(steps), desc="Progress", unit="step") as pbar:
+    # Step 1: Manual login for the source instance
+    pbar.set_description("Step 1: " + steps[0])
+    manual_login(base_urls['source'])
+    pbar.update(1)
 
-# Manual login for the target instance
-manual_login(base_urls['target'])
+    # Step 2: Extract global permissions from the source instance
+    pbar.set_description("Step 2: " + steps[1])
+    navigate_to_page(base_urls['source'], paths['global_permissions'])
+    source_permissions = extract_permissions()
+    pbar.update(1)
 
-# Extract and add permissions from the target instance
-navigate_to_page(base_urls['target'], paths['global_permissions'])
-target_permissions = extract_permissions()
+    # Step 3: Manual login for the target instance
+    pbar.set_description("Step 3: " + steps[2])
+    manual_login(base_urls['target'])
+    pbar.update(1)
 
-# Compare permissions and add missing groups to the document
-missing_permissions = compare_permissions(source_permissions, target_permissions)
-add_permissions_to_doc(doc, 'Missing Permissions in Target Instance', missing_permissions)
+    # Step 4: Extract global permissions from the target instance
+    pbar.set_description("Step 4: " + steps[3])
+    navigate_to_page(base_urls['target'], paths['global_permissions'])
+    target_permissions = extract_permissions()
+    pbar.update(1)
 
-# Take screenshots of the specific div for Time Tracking settings and add them to the document
-take_screenshot_of_div(base_urls['source'], paths['time_tracking'], 'common-setting-items', 'source_time_tracking.png')
-add_screenshot_to_doc(doc, 'Source Time Tracking Settings', 'source_time_tracking.png')
+    # Step 5: Compare permissions and document missing groups
+    pbar.set_description("Step 5: " + steps[4])
+    missing_permissions = compare_permissions(source_permissions, target_permissions)
+    add_permissions_to_doc(doc, 'Missing Permissions in Target Instance', missing_permissions)
+    pbar.update(1)
 
-take_screenshot_of_div(base_urls['target'], paths['time_tracking'], 'common-setting-items', 'target_time_tracking.png')
-add_screenshot_to_doc(doc, 'Target Time Tracking Settings', 'target_time_tracking.png')
+    # Step 6: Take screenshots of Time Tracking settings
+    pbar.set_description("Step 6: " + steps[5])
+    take_screenshot_of_div(base_urls['source'], paths['time_tracking'], 'common-setting-items', 'source_time_tracking.png')
+    add_screenshot_to_doc(doc, 'Source Time Tracking Settings', 'source_time_tracking.png')
+    take_screenshot_of_div(base_urls['target'], paths['time_tracking'], 'common-setting-items', 'target_time_tracking.png')
+    add_screenshot_to_doc(doc, 'Target Time Tracking Settings', 'target_time_tracking.png')
+    pbar.update(1)
 
-# Extract and add plans permissions from the source instance
-navigate_to_page(base_urls['source'], paths['plans_permissions'])
-source_plans_permissions = extract_plans_permissions()
-#add_permissions_to_doc(doc, 'Source Plans Permissions', source_plans_permissions)
+    # Step 7: Extract and compare plans permissions
+    pbar.set_description("Step 7: " + steps[6])
+    navigate_to_page(base_urls['source'], paths['plans_permissions'])
+    source_plans_permissions = extract_plans_permissions()
+    navigate_to_page(base_urls['target'], paths['plans_permissions'])
+    target_plans_permissions = extract_plans_permissions()
+    missing_plans_permissions = compare_permissions(source_plans_permissions, target_plans_permissions)
+    add_permissions_to_doc(doc, 'Missing Plans Permissions in Target Instance', missing_plans_permissions)
+    pbar.update(1)
 
-# Extract and add plans permissions from the target instance
-navigate_to_page(base_urls['target'], paths['plans_permissions'])
-target_plans_permissions = extract_plans_permissions()
-#add_permissions_to_doc(doc, 'Target Plans Permissions', target_plans_permissions)
+    # Step 8: Take screenshots of the issue hierarchy page
+    pbar.set_description("Step 8: " + steps[7])
+    take_screenshot_of_div(base_urls['source'], paths['issue_hierarchy'], 'ak-main-content', 'source_issue_hierarchy.png', By.ID)
+    add_screenshot_to_doc(doc, 'Source Issue Hierarchy Settings', 'source_issue_hierarchy.png')
+    take_screenshot_of_div(base_urls['target'], paths['issue_hierarchy'], 'ak-main-content', 'target_issue_hierarchy.png', By.ID)
+    add_screenshot_to_doc(doc, 'Target Issue Hierarchy Settings', 'target_issue_hierarchy.png')
+    pbar.update(1)
 
-# Compare plans permissions and add missing groups to the document
-missing_plans_permissions = compare_permissions(source_plans_permissions, target_plans_permissions)
-add_permissions_to_doc(doc, 'Missing Plans Permissions in Target Instance', missing_plans_permissions)
+    # Step 9: Take screenshots of plans dependency settings
+    pbar.set_description("Step 9: " + steps[8])
+    take_screenshot_of_div(base_urls['source'], paths['plans_dependency'], 'ak-main-content', 'source_plans_dependency.png', By.ID)
+    add_screenshot_to_doc(doc, 'Source Plans Dependency Settings', 'source_plans_dependency.png')
+    take_screenshot_of_div(base_urls['target'], paths['plans_dependency'], 'ak-main-content', 'target_plans_dependency.png', By.ID)
+    add_screenshot_to_doc(doc, 'Target Plans Dependency Settings', 'target_plans_dependency.png')
+    pbar.update(1)
 
-# Take screenshot of the issue hierarchy page and add it to the document
-take_screenshot_of_div(base_urls['source'], paths['issue_hierarchy'], 'ak-main-content', 'source_issue_hierarchy.png', By.ID)
-add_screenshot_to_doc(doc, 'Source Issue Hierarchy Settings', 'source_issue_hierarchy.png')
-
-take_screenshot_of_div(base_urls['target'], paths['issue_hierarchy'], 'ak-main-content', 'target_issue_hierarchy.png', By.ID)
-add_screenshot_to_doc(doc, 'Target Issue Hierarchy Settings', 'target_issue_hierarchy.png')
-
-# Take screenshot of the plans dependency settings page and add it to the document
-take_screenshot_of_div(base_urls['source'], paths['plans_dependency'], 'ak-main-content', 'source_plans_dependency.png', By.ID)
-add_screenshot_to_doc(doc, 'Source Plans Dependency Settings', 'source_plans_dependency.png')
-
-take_screenshot_of_div(base_urls['target'], paths['plans_dependency'], 'ak-main-content', 'target_plans_dependency.png', By.ID)
-add_screenshot_to_doc(doc, 'Target Plans Dependency Settings', 'target_plans_dependency.png')
-
-# Save the document
-doc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jira_permissions.docx')
-doc.save(doc_path)
-logging.info(f"Document saved to {doc_path}")
+    # Step 10: Save the document
+    pbar.set_description("Step 10: " + steps[9])
+    doc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jira_permissions.docx')
+    doc.save(doc_path)
+    logging.info(f"Document saved to {doc_path}")
+    pbar.update(1)
 
 # Close the WebDriver
 driver.quit()
