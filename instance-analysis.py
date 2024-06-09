@@ -9,15 +9,14 @@ from tqdm import tqdm  # Import the tqdm library for progress bars
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
 
-# Configuration for both Jira instances
 source_config = {
-    'email': 'Rodolfo.bortolin@dowjones.com',
+    'email': 'rodolfobortolin@gmail.com',
     'token': '',
     'base_url': 'https://source.atlassian.net'
 }
 
 target_config = {
-    'email': 'Rodolfo.bortolin@dowjones.com',
+    'email': 'rodolfobortolin@gmail.com',
     'token': '',
     'base_url': 'https://target.atlassian.net'
 }
@@ -43,8 +42,9 @@ def get_group_members(config, group_name, desc='Fetching group members'):
     max_results = 50
     members = []
 
-    total = 1  # Initially unknown
-    with tqdm(total=total, desc=desc, ncols=100) as pbar:
+    total = None  # Initially unknown
+    progress_desc = f"{desc} ({group_name})"
+    with tqdm(total=total, desc=progress_desc, ncols=100) as pbar:
         while True:
             try:
                 url = f"{config['base_url']}/rest/api/2/group/member?groupname={group_name}&startAt={start_at}&maxResults={max_results}"
@@ -56,26 +56,33 @@ def get_group_members(config, group_name, desc='Fetching group members'):
                 data = response.json()
                 members.extend(data.get('values', []))
                 
+                # Update the progress bar
+                if total is None:
+                    total = data.get('total', len(data.get('values', [])))
+                    pbar.total = total
+                pbar.update(len(data.get('values', [])))
+                
                 if data.get('isLast', True):
                     break
 
                 start_at += max_results
-                total = data.get('total', total)
-                pbar.total = total
-                pbar.update(len(data.get('values', [])))
             except requests.exceptions.RequestException as e:
-                print(f"An error occurred: {e}")
-                break
+                print(f"An error occurred: {e}. Skipping to the next page.")
+                start_at += max_results
+                continue
             except KeyError as e:
-                print(f"Missing expected key: {e}")
-                break
+                print(f"Missing expected key: {e}. Skipping to the next page.")
+                start_at += max_results
+                continue
             except Exception as e:
-                print(f"An unexpected error occurred: {e}")
-                break
-
+                print(f"An unexpected error occurred: {e}. Skipping to the next page.")
+                start_at += max_results
+                continue
+        
         # Ensure the progress bar completes fully
-        pbar.n = total
-        pbar.last_print_n = total
+        if pbar.n < pbar.total:
+            pbar.n = pbar.total
+            pbar.last_print_n = pbar.total
         pbar.close()
     
     return members
@@ -182,6 +189,7 @@ def search_dashboards(config, desc='Fetching dashboards'):
     return [dashboard for dashboard in dashboards if dashboard['name'] != 'Default dashboard']
 
 # Function to get notification schemes with pagination and progress bar
+# Function to get notification schemes with pagination and progress bar
 def get_notification_schemes(config, desc='Fetching notification schemes'):
     notification_schemes = []
     start_at = 0
@@ -207,29 +215,44 @@ def get_notification_schemes(config, desc='Fetching notification schemes'):
                 start_at += max_results
             except requests.exceptions.RequestException as e:
                 print(f"An error occurred: {e}")
-                break
+                start_at += max_results
+                continue
             except KeyError as e:
                 print(f"Missing expected key: {e}")
-                break
+                start_at += max_results
+                continue
             except Exception as e:
                 print(f"An unexpected error occurred: {e}")
-                break
+                start_at += max_results
+                continue
         
         # Ensure the progress bar completes fully
-        pbar.n = total
-        pbar.last_print_n = total
+        if pbar.n < pbar.total:
+            pbar.n = total
+            pbar.last_print_n = total
         pbar.close()
     
     return notification_schemes
+  
+  # Function to get notification scheme names for a list of schemes
+def get_notification_schemes_with_names(config, schemes, desc='Fetching notification scheme names'):
+    for scheme in tqdm(schemes, desc=desc, ncols=100):
+        scheme['name'] = get_notification_scheme_name(config, scheme['notificationSchemeId'])
+    return schemes
 
+# Cache for notification scheme names to avoid multiple API calls
+notification_scheme_name_cache = {}
 # Function to get notification scheme name
-def get_notification_scheme_name(config, scheme_id, desc='Fetching notification scheme name'):
+def get_notification_scheme_name(config, scheme_id):
+    if scheme_id in notification_scheme_name_cache:
+        return notification_scheme_name_cache[scheme_id]
+
     url = f"{config['base_url']}/rest/api/2/notificationscheme/{scheme_id}"
-    with tqdm(total=1, desc=desc, ncols=100) as pbar:
-        response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
-        pbar.update(1)
-        response.raise_for_status()
-    return response.json().get('name')
+    response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
+    response.raise_for_status()
+    name = response.json().get('name')
+    notification_scheme_name_cache[scheme_id] = name
+    return name
 
 # Define endpoints for required data
 endpoints = {
@@ -294,9 +317,6 @@ def add_projects_section(doc, source_data, target_data):
     source_count = len(source_data)
     target_count = len(target_data)
 
-    logging.info(f"Analyzing Projects")
-    logging.info(f"Source count: {source_count}, Target count: {target_count}")
-    
     additions = analyze_additions({item['key']: item.get('description', 'No description') for item in source_data}, {item['key']: item.get('description', 'No description') for item in target_data})
     conflicts = analyze_merges({item['key']: item.get('description', 'No description') for item in source_data}, {item['key']: item.get('description', 'No description') for item in target_data})
     
@@ -382,9 +402,6 @@ def add_filters_section(doc, source_data, target_data):
     source_count = len(source_data)
     target_count = len(target_data)
 
-    logging.info(f"Analyzing Filters")
-    logging.info(f"Source count: {source_count}, Target count: {target_count}")
-
     doc.add_heading('Filters', level=1)
     doc.add_paragraph(f"• Number of filters in source instance: {source_count}")
     doc.add_paragraph(f"• Number of filters in target instance: {target_count}")
@@ -400,9 +417,6 @@ def add_filters_section(doc, source_data, target_data):
 def add_dashboards_section(doc, source_data, target_data):
     source_count = len(source_data)
     target_count = len(target_data)
-
-    logging.info(f"Analyzing Dashboards")
-    logging.info(f"Source count: {source_count}, Target count: {target_count}")
 
     doc.add_heading('Dashboards', level=1)
     doc.add_paragraph(f"• Number of dashboards in source instance: {source_count}")
@@ -718,9 +732,6 @@ def analyze_and_add_section(doc, title, source_data, target_data, key_attr):
     source_count = len(source_data)
     target_count = len(target_data)
 
-    logging.info(f"Analyzing {title}")
-    logging.info(f"Source count: {source_count}, Target count: {target_count}")
-    
     additions = analyze_additions({item[key_attr]: item.get('description', 'No description') for item in source_data}, {item[key_attr]: item.get('description', 'No description') for item in target_data})
     merges = analyze_merges({item[key_attr]: item.get('description', 'No description') for item in source_data}, {item[key_attr]: item.get('description', 'No description') for item in target_data})
     
