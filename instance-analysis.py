@@ -573,13 +573,14 @@ def add_licenses_section(doc, source_application_roles, target_application_roles
 
     # Calculate remaining seats if all users are transferred from source to target
     doc.add_heading('Remaining Seats After Transfer', level=1)
-    table = doc.add_table(rows=1, cols=4)
+    table = doc.add_table(rows=1, cols=5)
     table.style = 'Table Grid'
     hdr_cells = table.rows[0].cells
     hdr_cells[0].text = 'License Type'
     hdr_cells[1].text = 'Total Users in Source'
     hdr_cells[2].text = 'Total Users in Target'
-    hdr_cells[3].text = 'Remaining Seats After Transfer'
+    hdr_cells[3].text = 'Unique Users from Source'
+    hdr_cells[4].text = 'Remaining Seats After Transfer'
 
     for license_type, source_users in source_users_by_license.items():
         if license_type in target_users_by_license:
@@ -594,7 +595,33 @@ def add_licenses_section(doc, source_application_roles, target_application_roles
             row_cells[0].text = license_type
             row_cells[1].text = str(len(source_users))
             row_cells[2].text = str(len(target_users))
-            row_cells[3].text = str(remaining_seats_after_transfer)
+            row_cells[3].text = str(len(unique_source_users))
+            row_cells[4].text = str(remaining_seats_after_transfer)
+        else:
+            # Handle cases where the license type exists only in the source
+            unique_source_users = source_users
+            total_users_after_transfer = len(unique_source_users)
+            target_role = next(role for role in source_application_roles if role['name'] == license_type)
+            remaining_seats_after_transfer = target_role['numberOfSeats'] - total_users_after_transfer
+
+            row_cells = table.add_row().cells
+            row_cells[0].text = license_type
+            row_cells[1].text = str(len(source_users))
+            row_cells[2].text = '0'
+            row_cells[3].text = str(len(unique_source_users))
+            row_cells[4].text = str(remaining_seats_after_transfer)
+
+    for license_type, target_users in target_users_by_license.items():
+        if license_type not in source_users_by_license:
+            row_cells = table.add_row().cells
+            row_cells[0].text = license_type
+            row_cells[1].text = '0'
+            row_cells[2].text = str(len(target_users))
+            row_cells[3].text = '0'
+            target_role = next(role for role in target_application_roles if role['name'] == license_type)
+            remaining_seats_after_transfer = target_role['numberOfSeats'] - len(target_users)
+            row_cells[4].text = str(remaining_seats_after_transfer)
+
 
 # Function to analyze and add sections for all required entities
 def analyze_and_add_section(doc, title, source_data, target_data, key_attr):
