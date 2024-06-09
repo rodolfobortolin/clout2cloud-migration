@@ -38,32 +38,35 @@ FIELD_TYPE_MAPPING = {
 def get_readable_field_type(api_field_type):
     return FIELD_TYPE_MAPPING.get(api_field_type, api_field_type)
 
-def get_group_members(config, group_name):
+def get_group_members(config, group_name, desc='Fetching group members'):
     start_at = 0
     max_results = 50
     members = []
 
-    while True:
-        url = f"{config['base_url']}/rest/api/2/group/member?groupname={group_name}&startAt={start_at}&maxResults={max_results}"
-        auth = HTTPBasicAuth(config['email'], config['token'])
-        headers = {"Accept": "application/json"}
-        
-        response = requests.get(url, auth=auth, headers=headers)
-        response.raise_for_status()
-        data = response.json()
-        members.extend(data.get('values', []))
+    total = 1  # Initially unknown
+    with tqdm(total=total, desc=desc, ncols=100) as pbar:
+        while True:
+            url = f"{config['base_url']}/rest/api/2/group/member?groupname={group_name}&startAt={start_at}&maxResults={max_results}"
+            auth = HTTPBasicAuth(config['email'], config['token'])
+            headers = {"Accept": "application/json"}
+            
+            response = requests.get(url, auth=auth, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            members.extend(data.get('values', []))
+            if data.get('isLast', True):
+                break
 
-        if data.get('isLast', True):
-            break
-
-        start_at += max_results
-
+            start_at += max_results
+            total = data.get('total', total)
+            pbar.total = total
+            pbar.update(max_results)
     return members
 
-def get_all_users_by_license(application_roles, config):
+def get_all_users_by_license(application_roles, config, desc='Fetching users by license'):
     users_by_license = defaultdict(set)
     
-    for role in application_roles:
+    for role in tqdm(application_roles, desc=desc, ncols=100):
         # Combine both groups and defaultGroups
         all_groups = set(role.get('groups', [])) | set(role.get('defaultGroups', []))
         for group in all_groups:
@@ -150,10 +153,12 @@ def get_notification_schemes(config, desc='Fetching notification schemes'):
     return notification_schemes
 
 # Function to get notification scheme name
-def get_notification_scheme_name(config, scheme_id):
+def get_notification_scheme_name(config, scheme_id, desc='Fetching notification scheme name'):
     url = f"{config['base_url']}/rest/api/2/notificationscheme/{scheme_id}"
-    response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
-    response.raise_for_status()
+    with tqdm(total=1, desc=desc, ncols=100) as pbar:
+        response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
+        pbar.update(1)
+        response.raise_for_status()
     return response.json().get('name')
 
 # Define endpoints for required data
@@ -544,8 +549,8 @@ def add_licenses_section(doc, source_application_roles, target_application_roles
     add_table(doc, target_application_roles, "Target Instance")
 
     # Get all users by license for source and target instances
-    source_users_by_license = get_all_users_by_license(source_application_roles, source_config)
-    target_users_by_license = get_all_users_by_license(target_application_roles, target_config)
+    source_users_by_license = get_all_users_by_license(source_application_roles, source_config, 'Fetching users by license (source)')
+    target_users_by_license = get_all_users_by_license(target_application_roles, target_config, 'Fetching users by license (target)')
 
     # Find common users in both instances
     common_users = {}
