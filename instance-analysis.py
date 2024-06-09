@@ -11,13 +11,13 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(m
 
 # Configuration for both Jira instances
 source_config = {
-    'email': 'rodolfobortolin@gmail.com',
+    'email': 'Rodolfo.bortolin@dowjones.com',
     'token': '',
     'base_url': 'https://source.atlassian.net'
 }
 
 target_config = {
-    'email': 'rodolfobortolin@gmail.com',
+    'email': 'Rodolfo.bortolin@dowjones.com',
     'token': '',
     'base_url': 'https://target.atlassian.net'
 }
@@ -46,21 +46,38 @@ def get_group_members(config, group_name, desc='Fetching group members'):
     total = 1  # Initially unknown
     with tqdm(total=total, desc=desc, ncols=100) as pbar:
         while True:
-            url = f"{config['base_url']}/rest/api/2/group/member?groupname={group_name}&startAt={start_at}&maxResults={max_results}"
-            auth = HTTPBasicAuth(config['email'], config['token'])
-            headers = {"Accept": "application/json"}
-            
-            response = requests.get(url, auth=auth, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-            members.extend(data.get('values', []))
-            if data.get('isLast', True):
+            try:
+                url = f"{config['base_url']}/rest/api/2/group/member?groupname={group_name}&startAt={start_at}&maxResults={max_results}"
+                auth = HTTPBasicAuth(config['email'], config['token'])
+                headers = {"Accept": "application/json"}
+                
+                response = requests.get(url, auth=auth, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                members.extend(data.get('values', []))
+                
+                if data.get('isLast', True):
+                    break
+
+                start_at += max_results
+                total = data.get('total', total)
+                pbar.total = total
+                pbar.update(len(data.get('values', [])))
+            except requests.exceptions.RequestException as e:
+                print(f"An error occurred: {e}")
+                break
+            except KeyError as e:
+                print(f"Missing expected key: {e}")
+                break
+            except Exception as e:
+                print(f"An unexpected error occurred: {e}")
                 break
 
-            start_at += max_results
-            total = data.get('total', total)
-            pbar.total = total
-            pbar.update(max_results)
+        # Ensure the progress bar completes fully
+        pbar.n = total
+        pbar.last_print_n = total
+        pbar.close()
+    
     return members
 
 def get_all_users_by_license(application_roles, config, desc='Fetching users by license'):
@@ -82,14 +99,21 @@ def get_jira_data(config, endpoint, desc='Fetching data'):
     url = f"{config['base_url']}{endpoint}"
     auth = HTTPBasicAuth(config['email'], config['token'])
     headers = {"Accept": "application/json"}
-    
-    with tqdm(total=1, desc=desc, ncols=100) as pbar:
-        response = requests.get(url, auth=auth, headers=headers)
-        pbar.update(1)
-        response.raise_for_status()
-        return response.json()
 
-# Function to search filters with pagination and progress bar
+    # Make the initial request to get the data
+    response = requests.get(url, auth=auth, headers=headers)
+    response.raise_for_status()
+    data = response.json()
+
+    # Determine the number of elements to set the progress bar total
+    elements_count = len(data)
+    
+    with tqdm(total=elements_count, desc=desc, ncols=100) as pbar:
+        # Update the progress bar based on the number of elements
+        pbar.update(elements_count)
+        
+    return data
+
 def search_filters(config, desc='Fetching filters'):
     filters = []
     start_at = 0
@@ -97,17 +121,30 @@ def search_filters(config, desc='Fetching filters'):
     total = 1
     with tqdm(total=total, desc=desc, ncols=100) as pbar:
         while True:
-            url = f"{config['base_url']}/rest/api/2/filter/search?expand=description,owner,jql,sharePermissions,editPermissions&startAt={start_at}&maxResults={max_results}"
-            response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
-            response.raise_for_status()
-            data = response.json()
-            filters.extend(data.get('values', []))
-            if data.get('isLast', True):
+            try:
+                url = f"{config['base_url']}/rest/api/2/filter/search?expand=description,owner,jql,sharePermissions,editPermissions&startAt={start_at}&maxResults={max_results}"
+                response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
+                response.raise_for_status()
+                data = response.json()
+                filters.extend(data.get('values', []))
+                start_at += max_results
+                if data.get('isLast', True):
+                    break
+                total = data.get('total', total)
+                pbar.total = total
+                pbar.update(len(data.get('values', [])))
+            except requests.exceptions.RequestException as e:
+                print(f"An error occurred: {e}")
                 break
-            start_at += max_results
-            total = data.get('total', total)
-            pbar.total = total
-            pbar.update(max_results)
+            except KeyError as e:
+                print(f"Missing expected key: {e}")
+                break
+            except Exception as e:
+                print(f"An unexpected error occurred: {e}")
+                break
+        pbar.n = total
+        pbar.last_print_n = total
+        pbar.close()
     return filters
 
 # Function to search dashboards with pagination and progress bar
@@ -118,17 +155,30 @@ def search_dashboards(config, desc='Fetching dashboards'):
     total = 1
     with tqdm(total=total, desc=desc, ncols=100) as pbar:
         while True:
-            url = f"{config['base_url']}/rest/api/2/dashboard?startAt={start_at}&maxResults={max_results}"
-            response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
-            response.raise_for_status()
-            data = response.json()
-            dashboards.extend(data.get('dashboards', []))
-            if data.get('isLast', True):
+            try:
+                url = f"{config['base_url']}/rest/api/2/dashboard?startAt={start_at}&maxResults={max_results}"
+                response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
+                response.raise_for_status()
+                data = response.json()
+                dashboards.extend(data.get('dashboards', []))
+                start_at += max_results
+                if data.get('isLast', True):
+                    break
+                total = data.get('total', total)
+                pbar.total = total
+                pbar.update(len(data.get('dashboards', [])))
+            except requests.exceptions.RequestException as e:
+                print(f"An error occurred: {e}")
                 break
-            start_at += max_results
-            total = data.get('total', total)
-            pbar.total = total
-            pbar.update(max_results)
+            except KeyError as e:
+                print(f"Missing expected key: {e}")
+                break
+            except Exception as e:
+                print(f"An unexpected error occurred: {e}")
+                break
+        pbar.n = total
+        pbar.last_print_n = total
+        pbar.close()
     return [dashboard for dashboard in dashboards if dashboard['name'] != 'Default dashboard']
 
 # Function to get notification schemes with pagination and progress bar
@@ -139,17 +189,37 @@ def get_notification_schemes(config, desc='Fetching notification schemes'):
     total = 1
     with tqdm(total=total, desc=desc, ncols=100) as pbar:
         while True:
-            url = f"{config['base_url']}/rest/api/2/notificationscheme/project?startAt={start_at}&maxResults={max_results}"
-            response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
-            response.raise_for_status()
-            data = response.json()
-            notification_schemes.extend(data.get('values', []))
-            if data.get('isLast', True):
+            try:
+                url = f"{config['base_url']}/rest/api/2/notificationscheme/project?startAt={start_at}&maxResults={max_results}"
+                response = requests.get(url, headers={"Accept": "application/json"}, auth=HTTPBasicAuth(config['email'], config['token']))
+                response.raise_for_status()
+                data = response.json()
+                notification_schemes.extend(data.get('values', []))
+                
+                # Update the progress bar
+                total = data.get('total', total)
+                pbar.total = total
+                pbar.update(len(data.get('values', [])))
+                
+                if data.get('isLast', True):
+                    break
+                
+                start_at += max_results
+            except requests.exceptions.RequestException as e:
+                print(f"An error occurred: {e}")
                 break
-            start_at += max_results
-            total = data.get('total', total)
-            pbar.total = total
-            pbar.update(max_results)
+            except KeyError as e:
+                print(f"Missing expected key: {e}")
+                break
+            except Exception as e:
+                print(f"An unexpected error occurred: {e}")
+                break
+        
+        # Ensure the progress bar completes fully
+        pbar.n = total
+        pbar.last_print_n = total
+        pbar.close()
+    
     return notification_schemes
 
 # Function to get notification scheme name
@@ -170,8 +240,6 @@ endpoints = {
     'issuetypes': '/rest/api/3/issuetype',
     'customfields': '/rest/api/3/field',
     'statuses': '/rest/api/3/status',
-    'filters': '/rest/api/2/filter/search',
-    'dashboards': '/rest/api/2/dashboard/search'
 }
 
 # Function to get application roles
