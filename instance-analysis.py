@@ -22,6 +22,22 @@ target_config = {
     'base_url': 'https://target.atlassian.net'
 }
 
+FIELD_TYPE_MAPPING = {
+    "option": "Select List (Single Select)",
+    "array": "Select List (Multiple Select)",
+    "string": "Text",
+    "date": "Date",
+    "datetime": "Date/Time",
+    "number": "Number",
+    "sd-servicelevelagreement": "Service Level Agreement (SLA)",
+    "project": "Project Picker",
+    "option-with-child": "Select List (cascade)",
+    # Add other mappings as needed
+}
+
+def get_readable_field_type(api_field_type):
+    return FIELD_TYPE_MAPPING.get(api_field_type, api_field_type)
+
 def get_group_members(config, group_name):
     start_at = 0
     max_results = 50
@@ -48,7 +64,9 @@ def get_all_users_by_license(application_roles, config):
     users_by_license = defaultdict(set)
     
     for role in application_roles:
-        for group in role['groups']:
+        # Combine both groups and defaultGroups
+        all_groups = set(role.get('groups', [])) | set(role.get('defaultGroups', []))
+        for group in all_groups:
             members = get_group_members(config, group)
             for member in members:
                 if 'emailAddress' in member:
@@ -361,7 +379,7 @@ def add_custom_fields_section(doc, source_data, target_data):
         for name, source_type in additions.items():
             row_cells = table.add_row().cells
             row_cells[0].text = name
-            row_cells[1].text = source_type
+            row_cells[1].text = get_readable_field_type(source_type)
     else:
         doc.add_paragraph("No custom fields identified for addition.")
 
@@ -379,8 +397,8 @@ def add_custom_fields_section(doc, source_data, target_data):
             target_type = target_fields.get(name, 'N/A')
             row_cells = table.add_row().cells
             row_cells[0].text = name
-            row_cells[1].text = source_type
-            row_cells[2].text = target_type
+            row_cells[1].text = get_readable_field_type(source_type)
+            row_cells[2].text = get_readable_field_type(target_type)
     else:
         doc.add_paragraph("No custom fields with identical names found in both instances with differing types.")
 
@@ -396,7 +414,7 @@ def add_custom_fields_section(doc, source_data, target_data):
         for name, source_type in non_migratable.items():
             row_cells = table.add_row().cells
             row_cells[0].text = name
-            row_cells[1].text = source_type
+            row_cells[1].text = get_readable_field_type(source_type)
     else:
         doc.add_paragraph("No custom fields identified for exclusion from migration.")
 
@@ -585,8 +603,8 @@ def add_licenses_section(doc, source_application_roles, target_application_roles
     for license_type, source_users in source_users_by_license.items():
         if license_type in target_users_by_license:
             target_users = target_users_by_license[license_type]
-            common_users = source_users & target_users
-            unique_source_users = source_users - common_users
+            common_users_set = source_users & target_users
+            unique_source_users = source_users - common_users_set
             total_users_after_transfer = len(unique_source_users) + len(target_users)
             target_role = next(role for role in target_application_roles if role['name'] == license_type)
             remaining_seats_after_transfer = target_role['numberOfSeats'] - total_users_after_transfer
@@ -601,8 +619,8 @@ def add_licenses_section(doc, source_application_roles, target_application_roles
             # Handle cases where the license type exists only in the source
             unique_source_users = source_users
             total_users_after_transfer = len(unique_source_users)
-            target_role = next(role for role in source_application_roles if role['name'] == license_type)
-            remaining_seats_after_transfer = target_role['numberOfSeats'] - total_users_after_transfer
+            source_role = next(role for role in source_application_roles if role['name'] == license_type)
+            remaining_seats_after_transfer = source_role['numberOfSeats'] - total_users_after_transfer
 
             row_cells = table.add_row().cells
             row_cells[0].text = license_type
@@ -621,7 +639,6 @@ def add_licenses_section(doc, source_application_roles, target_application_roles
             target_role = next(role for role in target_application_roles if role['name'] == license_type)
             remaining_seats_after_transfer = target_role['numberOfSeats'] - len(target_users)
             row_cells[4].text = str(remaining_seats_after_transfer)
-
 
 # Function to analyze and add sections for all required entities
 def analyze_and_add_section(doc, title, source_data, target_data, key_attr):
