@@ -6,14 +6,15 @@ from docx import Document
 from docx.shared import Inches
 import logging
 from tqdm import tqdm
+from collections import defaultdict
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
 
 # Base URLs for the Jira instances
 base_urls = {
-    'source': 'https://southtech.atlassian.net',
-    'target': 'https://bortolin.atlassian.net'
+    'source': 'https://source.atlassian.net',
+    'target': 'https://target.atlassian.net'
 }
 
 # Paths for the Jira pages
@@ -22,7 +23,8 @@ paths = {
     'time_tracking': '/secure/admin/TimeTrackingAdmin.jspa',
     'plans_permissions': '/jira/plans/settings/permissions',
     'issue_hierarchy': '/jira/settings/issues/issue-hierarchy',
-    'plans_dependency': '/jira/plans/settings/dependencies'  # Assuming this is the correct path for plans dependency settings
+    'plans_dependency': '/jira/plans/settings/dependencies',
+    'plans': '/jira/plans'  # Path for plans
 }
 
 # Initialize WebDriver (Make sure to have the ChromeDriver in your PATH)
@@ -95,6 +97,23 @@ def extract_issue_hierarchy():
     
     return hierarchy
 
+def extract_plans_details():
+    plans = []
+    table = driver.find_element(By.CSS_SELECTOR, 'table[aria-label="Plans details"]')
+    rows = table.find_elements(By.TAG_NAME, 'tr')[1:]  # Skip the header row
+
+    for row in rows:
+        cols = row.find_elements(By.TAG_NAME, 'td')
+        if len(cols) >= 3:
+            try:
+                plan_name = cols[1].text.strip()
+                lead = cols[2].text.strip()
+                plans.append((plan_name, lead))
+            except Exception as e:
+                logging.error(f"Error extracting plan details: {e}")
+    
+    return plans
+
 def add_permissions_to_doc(doc, title, permissions):
     doc.add_heading(title, level=1)
     
@@ -128,11 +147,37 @@ def take_screenshot_of_div(base_url, path, div_identifier, filename, by=By.CLASS
     navigate_to_page(base_url, path)
     div_element = driver.find_element(by, div_identifier)
     div_element.screenshot(filename)
-    logging.info(f"Screenshot of {div_identifier} saved to {filename}")
+    logging.debug(f"Screenshot of {div_identifier} saved to {filename}")
 
 def add_screenshot_to_doc(doc, title, filename):
     doc.add_heading(title, level=1)
     doc.add_picture(filename, width=Inches(6))
+
+def compare_plans(source_plans, target_plans):
+    source_plan_names = {plan[0] for plan in source_plans}
+    target_plan_names = {plan[0] for plan in target_plans}
+    
+    common_plans = source_plan_names.intersection(target_plan_names)
+    return common_plans
+
+def add_plans_details_to_doc(doc, title, plans):
+    doc.add_heading(title, level=1)
+    table = doc.add_table(rows=1, cols=3)
+    hdr_cells = table.rows[0].cells
+    hdr_cells[0].text = 'Plan Name'
+    hdr_cells[1].text = 'Lead'
+    hdr_cells[2].text = 'Count'
+
+    plan_counts = defaultdict(int)
+    for plan_name, lead in plans:
+        plan_counts[plan_name] += 1
+
+    for plan_name, count in plan_counts.items():
+        lead = next(lead for name, lead in plans if name == plan_name)
+        row_cells = table.add_row().cells
+        row_cells[0].text = plan_name
+        row_cells[1].text = lead
+        row_cells[2].text = str(count)
 
 # Create a new Document
 doc = Document()
@@ -148,6 +193,7 @@ steps = [
     "Extract and compare plans permissions",
     "Take screenshots of issue hierarchy",
     "Take screenshots of plans dependency settings",
+    "Extract and document plans details",
     "Save document"
 ]
 
@@ -215,11 +261,31 @@ with tqdm(total=len(steps), desc="Progress", unit="step") as pbar:
     add_screenshot_to_doc(doc, 'Target Plans Dependency Settings', 'target_plans_dependency.png')
     pbar.update(1)
 
-    # Step 10: Save the document
+    # Step 10: Extract and document plans details
     pbar.set_description("Step 10: " + steps[9])
-    doc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jira_permissions.docx')
+    navigate_to_page(base_urls['source'], paths['plans'])
+    source_plans = extract_plans_details()
+    navigate_to_page(base_urls['target'], paths['plans'])
+    target_plans = extract_plans_details()
+    
+    # Document plans details
+    add_plans_details_to_doc(doc, 'Source Plans Details', source_plans)
+    add_plans_details_to_doc(doc, 'Target Plans Details', target_plans)
+    
+    # Check for conflicts
+    conflicts = compare_plans(source_plans, target_plans)
+    if conflicts:
+        doc.add_heading('Plans with Conflicts', level=1)
+        for plan_name in conflicts:
+            doc.add_paragraph(plan_name, style='ListBullet')
+    
+    pbar.update(1)
+
+    # Step 11: Save the document
+    pbar.set_description("Step 11: " + steps[10])
+    doc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jira_web_analysis.docx')
     doc.save(doc_path)
-    logging.info(f"Document saved to {doc_path}")
+    logging.debug(f"Document saved to {doc_path}")
     pbar.update(1)
 
 # Close the WebDriver
