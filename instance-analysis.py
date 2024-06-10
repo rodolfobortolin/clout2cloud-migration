@@ -37,14 +37,26 @@ FIELD_TYPE_MAPPING = {
 def get_readable_field_type(api_field_type):
     return FIELD_TYPE_MAPPING.get(api_field_type, api_field_type)
 
+def get_user_display_name(config, account_id):
+    url = f"{config['base_url']}/rest/api/3/user?accountId={account_id}"
+    auth = HTTPBasicAuth(config['email'], config['token'])
+    headers = {"Accept": "application/json"}
+    
+    response = requests.get(url, auth=auth, headers=headers)
+    response.raise_for_status()
+    user_data = response.json()
+    display_name = user_data.get('displayName', 'Unknown')
+    email_address = user_data.get('emailAddress', 'Unknown')
+    return f"{display_name} ({email_address})"
+
 def get_group_members(config, group_name, desc='Fetching group members'):
     start_at = 0
     max_results = 50
     members = []
 
-    total = None  # Initially unknown
+    total_filtered = 0  # Track the total number of non-app users
     progress_desc = f"{desc} ({group_name})"
-    with tqdm(total=total, desc=progress_desc, ncols=100) as pbar:
+    with tqdm(total=total_filtered, desc=progress_desc, ncols=100) as pbar:
         while True:
             try:
                 url = f"{config['base_url']}/rest/api/2/group/member?groupname={group_name}&startAt={start_at}&maxResults={max_results}"
@@ -54,13 +66,15 @@ def get_group_members(config, group_name, desc='Fetching group members'):
                 response = requests.get(url, auth=auth, headers=headers)
                 response.raise_for_status()
                 data = response.json()
-                members.extend(data.get('values', []))
                 
-                # Update the progress bar
-                if total is None:
-                    total = data.get('total', len(data.get('values', [])))
-                    pbar.total = total
-                pbar.update(len(data.get('values', [])))
+                # Filter out users where accountType is 'app'
+                filtered_members = [member for member in data.get('values', []) if member.get('accountType') != 'app']
+                members.extend(filtered_members)
+                
+                # Update the total number of non-app users
+                total_filtered += len(filtered_members)
+                pbar.total = total_filtered
+                pbar.update(len(filtered_members))
                 
                 if data.get('isLast', True):
                     break
@@ -96,8 +110,8 @@ def get_all_users_by_license(application_roles, config, desc='Fetching users by 
         for group in all_groups:
             members = get_group_members(config, group)
             for member in members:
-                if 'emailAddress' in member:
-                    users_by_license[role['name']].add(member['emailAddress'])
+                if 'accountId' in member:
+                    users_by_license[role['name']].add(member['accountId'])
     
     return users_by_license
 
@@ -256,7 +270,7 @@ def get_notification_scheme_name(config, scheme_id):
 
 # Define endpoints for required data
 endpoints = {
-    'projects': '/rest/api/3/project',
+    'projects': '/rest/api/3/project?expand=description,lead',
     'priorities': '/rest/api/3/priority',
     'resolutions': '/rest/api/3/resolution',
     'roles': '/rest/api/3/role',
@@ -317,8 +331,8 @@ def add_projects_section(doc, source_data, target_data):
     source_count = len(source_data)
     target_count = len(target_data)
 
-    additions = analyze_additions({item['key']: item.get('description', 'No description') for item in source_data}, {item['key']: item.get('description', 'No description') for item in target_data})
-    conflicts = analyze_merges({item['key']: item.get('description', 'No description') for item in source_data}, {item['key']: item.get('description', 'No description') for item in target_data})
+    additions = analyze_additions({item['key']: item for item in source_data}, {item['key']: item for item in target_data})
+    conflicts = analyze_merges({item['key']: item for item in source_data}, {item['key']: item for item in target_data})
     
     doc.add_heading('Projects', level=1)
     doc.add_paragraph(f"• Number of projects in source instance: {source_count}")
@@ -326,29 +340,41 @@ def add_projects_section(doc, source_data, target_data):
 
     doc.add_heading('Items to be added to the target instance', level=2)
     if additions:
-        table = doc.add_table(rows=1, cols=2)
+        table = doc.add_table(rows=1, cols=3)
         table.style = 'Table Grid'
         hdr_cells = table.rows[0].cells
         hdr_cells[0].text = 'Key'
-        hdr_cells[1].text = 'Description'
-        for addition_key, addition_description in additions.items():
+        hdr_cells[1].text = 'Project Type Key'
+        hdr_cells[2].text = 'Style'
+        for addition_key, addition_data in additions.items():
             row_cells = table.add_row().cells
             row_cells[0].text = addition_key
-            row_cells[1].text = addition_description
+            row_cells[1].text = addition_data.get('projectTypeKey', 'N/A')
+            row_cells[2].text = addition_data.get('style', 'N/A')
     else:
         doc.add_paragraph("No items identified for addition.")
 
     if conflicts:
         doc.add_heading('Conflicting project keys requiring renaming for migration', level=2)
-        table = doc.add_table(rows=1, cols=2)
+        table = doc.add_table(rows=1, cols=5)
         table.style = 'Table Grid'
         hdr_cells = table.rows[0].cells
         hdr_cells[0].text = 'Key'
-        hdr_cells[1].text = 'Description'
-        for conflict_key, conflict_description in conflicts.items():
+        hdr_cells[1].text = 'Source Project Type Key'
+        hdr_cells[2].text = 'Source Style'
+        hdr_cells[3].text = 'Target Project Type Key'
+        hdr_cells[4].text = 'Target Style'
+        
+        for conflict_key, conflict_data in conflicts.items():
+            source_project = next(item for item in source_data if item['key'] == conflict_key)
+            target_project = next(item for item in target_data if item['key'] == conflict_key)
+            
             row_cells = table.add_row().cells
             row_cells[0].text = conflict_key
-            row_cells[1].text = conflict_description
+            row_cells[1].text = source_project.get('projectTypeKey', 'N/A')
+            row_cells[2].text = source_project.get('style', 'N/A')
+            row_cells[3].text = target_project.get('projectTypeKey', 'N/A')
+            row_cells[4].text = target_project.get('style', 'N/A')
 
 def add_priorities_section(doc, source_data, target_data):
     analyze_and_add_section(doc, 'Priorities', source_data, target_data, 'name')
@@ -653,9 +679,10 @@ def add_licenses_section(doc, source_application_roles, target_application_roles
 
         for license_type, users in common_users.items():
             for user in users:
+                user_display_name = get_user_display_name(source_config, user)
                 row_cells = table.add_row().cells
                 row_cells[0].text = license_type
-                row_cells[1].text = user
+                row_cells[1].text = user_display_name
                 row_cells[2].text = '1 License'  # Since merging will save one license per user
 
         total_savings = sum(len(users) for users in common_users.values())
@@ -663,19 +690,6 @@ def add_licenses_section(doc, source_application_roles, target_application_roles
     else:
         doc.add_paragraph("No common users found that would save licenses.")
     
-    # Mention email domains that will be added (if any)
-    doc.add_heading('Domains to be Added', level=1)
-    source_domains = set(user.split('@')[-1] for users in source_users_by_license.values() for user in users)
-    target_domains = set(user.split('@')[-1] for users in target_users_by_license.values() for user in users)
-    new_domains = source_domains - target_domains
-
-    if new_domains:
-        doc.add_paragraph("The following domains will be added:")
-        for domain in new_domains:
-            doc.add_paragraph(domain)
-    else:
-        doc.add_paragraph("No new domains will be added.")
-
     # Calculate remaining seats if all users are transferred from source to target
     doc.add_heading('Remaining Seats After Transfer', level=1)
     table = doc.add_table(rows=1, cols=5)
@@ -726,6 +740,7 @@ def add_licenses_section(doc, source_application_roles, target_application_roles
             target_role = next(role for role in target_application_roles if role['name'] == license_type)
             remaining_seats_after_transfer = target_role['numberOfSeats'] - len(target_users)
             row_cells[4].text = str(remaining_seats_after_transfer)
+
 
 # Function to analyze and add sections for all required entities
 def analyze_and_add_section(doc, title, source_data, target_data, key_attr):
@@ -778,7 +793,7 @@ sections = [
 for title, key, attr in sections:
     try:
         if title == 'Projects':
-            add_projects_section(doc, data_source[key], data_target[key])
+            add_projects_section(doc, data_source[key], data_target[key],)
         elif title == 'Filters':
             add_filters_section(doc, data_source[key], data_target[key])
         elif title == 'Dashboards':
