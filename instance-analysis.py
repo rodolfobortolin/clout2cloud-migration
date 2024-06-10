@@ -9,14 +9,15 @@ from tqdm import tqdm  # Import the tqdm library for progress bars
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
 
+# Configuration for both Jira instances
 source_config = {
-    'email': 'rodolfobortolin@gmail.com',
+    'email': 'Rodolfo.bortolin@dowjones.com',
     'token': '',
     'base_url': 'https://source.atlassian.net'
 }
 
 target_config = {
-    'email': 'rodolfobortolin@gmail.com',
+    'email': 'Rodolfo.bortolin@dowjones.com',
     'token': '',
     'base_url': 'https://target.atlassian.net'
 }
@@ -202,7 +203,6 @@ def search_dashboards(config, desc='Fetching dashboards'):
         pbar.close()
     return [dashboard for dashboard in dashboards if dashboard['name'] != 'Default dashboard']
 
-# Function to get notification schemes with pagination and progress bar
 # Function to get notification schemes with pagination and progress bar
 def get_notification_schemes(config, desc='Fetching notification schemes'):
     notification_schemes = []
@@ -592,10 +592,10 @@ def add_notification_schemes_section(doc, source_schemes, target_schemes, projec
         scheme_to_projects[scheme_name].append(project_name)
 
     source_count = len(scheme_to_projects)
-    target_count = len({get_notification_scheme_name(config, scheme['notificationSchemeId']) for scheme in target_schemes})
+    #target_count = len({get_notification_scheme_name(config, scheme['notificationSchemeId']) for scheme in target_schemes})
 
     doc.add_paragraph(f"• Number of notification schemes in source instance: {source_count}")
-    doc.add_paragraph(f"• Number of notification schemes in target instance: {target_count}")
+    #doc.add_paragraph(f"• Number of notification schemes in target instance: {target_count}")
 
     doc.add_heading('Notification Schemes and Associated Projects', level=2)
     if scheme_to_projects:
@@ -787,47 +787,62 @@ sections = [
     ('Issue Types', 'issuetypes', 'name'),
     ('Filters', 'filters', 'name'),
     ('Dashboards', 'dashboards', 'name'),
-    ('Project Roles', 'roles', 'name')
+    ('Project Roles', 'roles', 'name'),
+    ('Licenses', 'licenses', 'name'),
+    ('Custom Fields', 'customfields', 'name'),
+    ('Statuses', 'statuses', 'name'),
+    ('Notification Schemes', 'notification_schemes', 'name')
 ]
 
 for title, key, attr in sections:
     try:
         if title == 'Projects':
-            add_projects_section(doc, data_source[key], data_target[key],)
+            try:
+                add_projects_section(doc, data_source[key], data_target[key])
+            except Exception as e:
+                logging.error(f"Failed to analyze {title}: {e}")
         elif title == 'Filters':
-            add_filters_section(doc, data_source[key], data_target[key])
+            try:
+                add_filters_section(doc, data_source[key], data_target[key])
+            except Exception as e:
+                logging.error(f"Failed to analyze {title}: {e}")
         elif title == 'Dashboards':
-            add_dashboards_section(doc, data_source[key], data_target[key])
+            try:
+                add_dashboards_section(doc, data_source[key], data_target[key])
+            except Exception as e:
+                logging.error(f"Failed to analyze {title}: {e}")
         elif title == 'Project Roles':
-            add_roles_section(doc, data_source[key], data_target[key])
+            try:
+                add_roles_section(doc, data_source[key], data_target[key])
+            except Exception as e:
+                logging.error(f"Failed to analyze {title}: {e}")
+        elif title == 'Licenses':
+            try:
+                add_licenses_section(doc, application_roles_source, application_roles_target, source_config, target_config)
+            except Exception as e:
+                logging.error(f"Failed to analyze {title}: {e}")
+        elif title == 'Custom Fields':
+            try:
+                add_custom_fields_section(doc, data_source[key], data_target[key])
+            except Exception as e:
+                logging.error(f"Failed to analyze {title}: {e}")
+        elif title == 'Statuses':
+            try:
+                add_statuses_section(doc, data_source[key], data_target[key])
+            except Exception as e:
+                logging.error(f"Failed to analyze {title}: {e}")
+        elif title == 'Notification Schemes':
+            try:
+                add_notification_schemes_section(doc, notification_schemes_source, notification_schemes_target, data_source['projects'], source_config)
+            except Exception as e:
+                logging.error(f"Failed to analyze {title}: {e}")
         else:
-            analyze_and_add_section(doc, title, data_source[key], data_target[key], attr)
+            try:
+                analyze_and_add_section(doc, title, data_source[key], data_target[key], attr)
+            except Exception as e:
+                logging.error(f"Failed to analyze {title}: {e}")
     except Exception as e:
-        logging.error(f"Failed to analyze {title}: {e}")
-
-# Special handling for custom fields with error handling
-try:
-    add_custom_fields_section(doc, data_source['customfields'], data_target['customfields'])
-except Exception as e:
-    logging.error(f"Failed to analyze custom fields: {e}")
-
-# Special handling for statuses with error handling
-try:
-    add_statuses_section(doc, data_source['statuses'], data_target['statuses'])
-except Exception as e:
-    logging.error(f"Failed to analyze statuses: {e}")
-
-# Special handling for notification schemes with error handling
-try:
-    add_notification_schemes_section(doc, notification_schemes_source, notification_schemes_target, data_source['projects'], source_config)
-except Exception as e:
-    logging.error(f"Failed to analyze notification schemes: {e}")
-
-# Special handling for licenses with error handling
-try:
-    add_licenses_section(doc, application_roles_source, application_roles_target, source_config, target_config)
-except Exception as e:
-    logging.error(f"Failed to analyze licenses: {e}")
+        logging.error(f"Failed to process {title}: {e}")
 
 # Save the document
 doc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jira_analysis.docx')
