@@ -698,7 +698,7 @@ def add_licenses_section(doc, source_application_roles, target_application_roles
     hdr_cells[0].text = 'License Type'
     hdr_cells[1].text = 'Total Users in Source'
     hdr_cells[2].text = 'Total Users in Target'
-    hdr_cells[3].text = 'Unique Users from Source'
+    hdr_cells[3].text = 'Total Users after Migration'
     hdr_cells[4].text = 'Remaining Seats After Transfer'
 
     for license_type, source_users in source_users_by_license.items():
