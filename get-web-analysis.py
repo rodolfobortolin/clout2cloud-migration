@@ -5,7 +5,6 @@ from selenium.webdriver.common.by import By
 from docx import Document
 from docx.shared import Inches
 import logging
-from tqdm import tqdm
 from collections import defaultdict
 
 # Configure logging
@@ -24,7 +23,6 @@ paths = {
     'plans_permissions': '/jira/plans/settings/permissions',
     'issue_hierarchy': '/jira/settings/issues/issue-hierarchy',
     'plans_dependency': '/jira/plans/settings/dependencies',
-    'plans': '/jira/plans'  # Path for plans
 }
 
 # Initialize WebDriver (Make sure to have the ChromeDriver in your PATH)
@@ -32,13 +30,14 @@ driver = webdriver.Chrome()
 
 def manual_login(base_url):
     driver.get(base_url)
-    print(f"Please log in to Jira in the browser that opened and navigate to any page of the required Jira instance.")
+    logging.info(f"Please log in to Jira in the browser that opened and navigate to any page of the required Jira instance.")
     input("Press Enter here in the terminal after you have logged in...")
 
 def navigate_to_page(base_url, path):
     url = f"{base_url}{path}"
     driver.get(url)
     time.sleep(4)  # Adjust sleep time as needed to ensure the page loads completely
+    logging.info(f"Navigated to {url}")
 
 def extract_permissions():
     permissions = {}
@@ -97,21 +96,28 @@ def extract_issue_hierarchy():
     
     return hierarchy
 
-def extract_plans_details():
+def extract_plans_details(base_url):
     plans = []
-    table = driver.find_element(By.CSS_SELECTOR, 'table[aria-label="Plans details"]')
-    rows = table.find_elements(By.TAG_NAME, 'tr')[1:]  # Skip the header row
+    page = 1
+    while True:
+        navigate_to_page(base_url, f"/jira/plans?name=&page={page}&sortKey=title&sortOrder=ASC")
+        table = driver.find_element(By.CSS_SELECTOR, 'table[aria-label="Plans details"]')
+        rows = table.find_elements(By.TAG_NAME, 'tr')[1:]  # Skip the header row
 
-    for row in rows:
-        cols = row.find_elements(By.TAG_NAME, 'td')
-        if len(cols) >= 3:
-            try:
-                plan_name = cols[1].text.strip()
-                lead = cols[2].text.strip()
-                plans.append((plan_name, lead))
-            except Exception as e:
-                logging.error(f"Error extracting plan details: {e}")
-    
+        if not rows:
+            break
+
+        for row in rows:
+            cols = row.find_elements(By.TAG_NAME, 'td')
+            if len(cols) >= 3:
+                try:
+                    plan_name = cols[1].text.strip()
+                    lead = cols[2].text.strip()
+                    plans.append((plan_name, lead))
+                except Exception as e:
+                    logging.error(f"Error extracting plan details: {e}")
+        page += 1
+
     return plans
 
 def add_permissions_to_doc(doc, title, permissions):
@@ -147,7 +153,7 @@ def take_screenshot_of_div(base_url, path, div_identifier, filename, by=By.CLASS
     navigate_to_page(base_url, path)
     div_element = driver.find_element(by, div_identifier)
     div_element.screenshot(filename)
-    logging.debug(f"Screenshot of {div_identifier} saved to {filename}")
+    logging.info(f"Screenshot of {div_identifier} saved to {filename}")
 
 def add_screenshot_to_doc(doc, title, filename):
     doc.add_heading(title, level=1)
@@ -182,7 +188,7 @@ def add_plans_details_to_doc(doc, title, plans):
 # Create a new Document
 doc = Document()
 
-# Define the steps for progress tracking
+# Define the steps for logging
 steps = [
     "Manual login for the source instance",
     "Extract global permissions from source",
@@ -197,76 +203,66 @@ steps = [
     "Save document"
 ]
 
-# Create a progress bar
-with tqdm(total=len(steps), desc="Progress", unit="step") as pbar:
+# Step-by-step execution with logging
+logging.info("Starting process")
+try:
     # Step 1: Manual login for the source instance
-    pbar.set_description("Step 1: " + steps[0])
+    logging.info("Step 1: " + steps[0])
     manual_login(base_urls['source'])
-    pbar.update(1)
 
     # Step 2: Extract global permissions from the source instance
-    pbar.set_description("Step 2: " + steps[1])
+    logging.info("Step 2: " + steps[1])
     navigate_to_page(base_urls['source'], paths['global_permissions'])
     source_permissions = extract_permissions()
-    pbar.update(1)
 
     # Step 3: Manual login for the target instance
-    pbar.set_description("Step 3: " + steps[2])
+    logging.info("Step 3: " + steps[2])
     manual_login(base_urls['target'])
-    pbar.update(1)
 
     # Step 4: Extract global permissions from the target instance
-    pbar.set_description("Step 4: " + steps[3])
+    logging.info("Step 4: " + steps[3])
     navigate_to_page(base_urls['target'], paths['global_permissions'])
     target_permissions = extract_permissions()
-    pbar.update(1)
 
     # Step 5: Compare permissions and document missing groups
-    pbar.set_description("Step 5: " + steps[4])
+    logging.info("Step 5: " + steps[4])
     missing_permissions = compare_permissions(source_permissions, target_permissions)
     add_permissions_to_doc(doc, 'Missing Permissions in Target Instance', missing_permissions)
-    pbar.update(1)
 
     # Step 6: Take screenshots of Time Tracking settings
-    pbar.set_description("Step 6: " + steps[5])
+    logging.info("Step 6: " + steps[5])
     take_screenshot_of_div(base_urls['source'], paths['time_tracking'], 'common-setting-items', 'source_time_tracking.png')
     add_screenshot_to_doc(doc, 'Source Time Tracking Settings', 'source_time_tracking.png')
     take_screenshot_of_div(base_urls['target'], paths['time_tracking'], 'common-setting-items', 'target_time_tracking.png')
     add_screenshot_to_doc(doc, 'Target Time Tracking Settings', 'target_time_tracking.png')
-    pbar.update(1)
 
     # Step 7: Extract and compare plans permissions
-    pbar.set_description("Step 7: " + steps[6])
+    logging.info("Step 7: " + steps[6])
     navigate_to_page(base_urls['source'], paths['plans_permissions'])
     source_plans_permissions = extract_plans_permissions()
     navigate_to_page(base_urls['target'], paths['plans_permissions'])
     target_plans_permissions = extract_plans_permissions()
     missing_plans_permissions = compare_permissions(source_plans_permissions, target_plans_permissions)
     add_permissions_to_doc(doc, 'Missing Plans Permissions in Target Instance', missing_plans_permissions)
-    pbar.update(1)
 
     # Step 8: Take screenshots of the issue hierarchy page
-    pbar.set_description("Step 8: " + steps[7])
+    logging.info("Step 8: " + steps[7])
     take_screenshot_of_div(base_urls['source'], paths['issue_hierarchy'], 'ak-main-content', 'source_issue_hierarchy.png', By.ID)
     add_screenshot_to_doc(doc, 'Source Issue Hierarchy Settings', 'source_issue_hierarchy.png')
     take_screenshot_of_div(base_urls['target'], paths['issue_hierarchy'], 'ak-main-content', 'target_issue_hierarchy.png', By.ID)
     add_screenshot_to_doc(doc, 'Target Issue Hierarchy Settings', 'target_issue_hierarchy.png')
-    pbar.update(1)
 
     # Step 9: Take screenshots of plans dependency settings
-    pbar.set_description("Step 9: " + steps[8])
+    logging.info("Step 9: " + steps[8])
     take_screenshot_of_div(base_urls['source'], paths['plans_dependency'], 'ak-main-content', 'source_plans_dependency.png', By.ID)
     add_screenshot_to_doc(doc, 'Source Plans Dependency Settings', 'source_plans_dependency.png')
     take_screenshot_of_div(base_urls['target'], paths['plans_dependency'], 'ak-main-content', 'target_plans_dependency.png', By.ID)
     add_screenshot_to_doc(doc, 'Target Plans Dependency Settings', 'target_plans_dependency.png')
-    pbar.update(1)
 
     # Step 10: Extract and document plans details
-    pbar.set_description("Step 10: " + steps[9])
-    navigate_to_page(base_urls['source'], paths['plans'])
-    source_plans = extract_plans_details()
-    navigate_to_page(base_urls['target'], paths['plans'])
-    target_plans = extract_plans_details()
+    logging.info("Step 10: " + steps[9])
+    source_plans = extract_plans_details(base_urls['source'])
+    target_plans = extract_plans_details(base_urls['target'])
     
     # Document plans details
     add_plans_details_to_doc(doc, 'Source Plans Details', source_plans)
@@ -278,15 +274,15 @@ with tqdm(total=len(steps), desc="Progress", unit="step") as pbar:
         doc.add_heading('Plans with Conflicts', level=1)
         for plan_name in conflicts:
             doc.add_paragraph(plan_name, style='ListBullet')
-    
-    pbar.update(1)
 
     # Step 11: Save the document
-    pbar.set_description("Step 11: " + steps[10])
+    logging.info("Step 11: " + steps[10])
     doc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jira_web_analysis.docx')
     doc.save(doc_path)
-    logging.debug(f"Document saved to {doc_path}")
-    pbar.update(1)
-
-# Close the WebDriver
-driver.quit()
+    logging.info(f"Document saved to {doc_path}")
+except Exception as e:
+    logging.error(f"An error occurred: {e}")
+finally:
+    # Close the WebDriver
+    driver.quit()
+    logging.info("Process completed and WebDriver closed")
