@@ -4,7 +4,8 @@ from requests.auth import HTTPBasicAuth
 import logging
 from collections import defaultdict
 from docx import Document
-from tqdm import tqdm  # Import the tqdm library for progress bars
+from tqdm import tqdm
+import inquirer
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
@@ -248,7 +249,7 @@ def get_notification_schemes(config, desc='Fetching notification schemes'):
     
     return notification_schemes
   
-  # Function to get notification scheme names for a list of schemes
+# Function to get notification scheme names for a list of schemes
 def get_notification_schemes_with_names(config, schemes, desc='Fetching notification scheme names'):
     for scheme in tqdm(schemes, desc=desc, ncols=100):
         scheme['name'] = get_notification_scheme_name(config, scheme['notificationSchemeId'])
@@ -268,16 +269,7 @@ def get_notification_scheme_name(config, scheme_id):
     notification_scheme_name_cache[scheme_id] = name
     return name
 
-# Define endpoints for required data
-endpoints = {
-    'projects': '/rest/api/3/project?expand=description,lead',
-    'priorities': '/rest/api/3/priority',
-    'resolutions': '/rest/api/3/resolution',
-    'roles': '/rest/api/3/role',
-    'issuetypes': '/rest/api/3/issuetype',
-    'customfields': '/rest/api/3/field',
-    'statuses': '/rest/api/3/status',
-}
+
 
 # Function to get application roles
 def get_application_roles(config):
@@ -290,27 +282,6 @@ def get_application_roles(config):
         pbar.update(1)
         response.raise_for_status()
         return response.json()
-
-# Fetch data from both instances with progress bars
-data_source = {key: get_jira_data(source_config, endpoint, f"Fetching {key} from source") for key, endpoint in endpoints.items()}
-data_target = {key: get_jira_data(target_config, endpoint, f"Fetching {key} from target") for key, endpoint in endpoints.items()}
-
-# Fetch filters and dashboards with pagination and progress bars
-data_source['filters'] = search_filters(source_config, 'Fetching filters from source')
-data_target['filters'] = search_filters(target_config, 'Fetching filters from target')
-data_source['dashboards'] = search_dashboards(source_config, 'Fetching dashboards from source')
-data_target['dashboards'] = search_dashboards(target_config, 'Fetching dashboards from target')
-
-# Fetch notification schemes with pagination and progress bars
-notification_schemes_source = get_notification_schemes(source_config, 'Fetching notification schemes from source')
-notification_schemes_target = get_notification_schemes(target_config, 'Fetching notification schemes from target')
-
-# Fetch application roles (licenses)
-application_roles_source = get_application_roles(source_config)
-application_roles_target = get_application_roles(target_config)
-
-# Create a new Document
-doc = Document()
 
 def analyze_additions(source, target):
     additions = {}
@@ -701,45 +672,48 @@ def add_licenses_section(doc, source_application_roles, target_application_roles
     hdr_cells[3].text = 'Total Users After Migration'
     hdr_cells[4].text = 'Remaining Seats After Transfer'
 
-    for license_type, source_users in source_users_by_license.items():
-        if license_type in target_users_by_license:
-            target_users = target_users_by_license[license_type]
-            common_users_set = source_users & target_users
-            unique_source_users = source_users - common_users_set
-            total_users_after_transfer = len(unique_source_users) + len(target_users)
-            target_role = next(role for role in target_application_roles if role['name'] == license_type)
-            remaining_seats_after_transfer = target_role['numberOfSeats'] - total_users_after_transfer
+    with tqdm(total=len(source_users_by_license) + len(target_users_by_license), desc='Calculating remaining seats', ncols=100) as pbar:
+        for license_type, source_users in source_users_by_license.items():
+            if license_type in target_users_by_license:
+                target_users = target_users_by_license[license_type]
+                common_users_set = source_users & target_users
+                unique_source_users = source_users - common_users_set
+                total_users_after_transfer = len(unique_source_users) + len(target_users)
+                target_role = next(role for role in target_application_roles if role['name'] == license_type)
+                remaining_seats_after_transfer = target_role['numberOfSeats'] - total_users_after_transfer
 
-            row_cells = table.add_row().cells
-            row_cells[0].text = license_type
-            row_cells[1].text = str(len(source_users))
-            row_cells[2].text = str(len(target_users))
-            row_cells[3].text = str(len(unique_source_users))
-            row_cells[4].text = str(remaining_seats_after_transfer)
-        else:
-            # Handle cases where the license type exists only in the source
-            unique_source_users = source_users
-            total_users_after_transfer = len(unique_source_users)
-            source_role = next(role for role in source_application_roles if role['name'] == license_type)
-            remaining_seats_after_transfer = source_role['numberOfSeats'] - total_users_after_transfer
+                row_cells = table.add_row().cells
+                row_cells[0].text = license_type
+                row_cells[1].text = str(len(source_users))
+                row_cells[2].text = str(len(target_users))
+                row_cells[3].text = str(len(unique_source_users))
+                row_cells[4].text = str(remaining_seats_after_transfer)
+            else:
+                # Handle cases where the license type exists only in the source
+                unique_source_users = source_users
+                total_users_after_transfer = len(unique_source_users)
+                source_role = next(role for role in source_application_roles if role['name'] == license_type)
+                remaining_seats_after_transfer = source_role['numberOfSeats'] - total_users_after_transfer
 
-            row_cells = table.add_row().cells
-            row_cells[0].text = license_type
-            row_cells[1].text = str(len(source_users))
-            row_cells[2].text = '0'
-            row_cells[3].text = str(len(unique_source_users))
-            row_cells[4].text = str(remaining_seats_after_transfer)
+                row_cells = table.add_row().cells
+                row_cells[0].text = license_type
+                row_cells[1].text = str(len(source_users))
+                row_cells[2].text = '0'
+                row_cells[3].text = str(len(unique_source_users))
+                row_cells[4].text = str(remaining_seats_after_transfer)
+            pbar.update(1)
 
-    for license_type, target_users in target_users_by_license.items():
-        if license_type not in source_users_by_license:
-            row_cells = table.add_row().cells
-            row_cells[0].text = license_type
-            row_cells[1].text = '0'
-            row_cells[2].text = str(len(target_users))
-            row_cells[3].text = '0'
-            target_role = next(role for role in target_application_roles if role['name'] == license_type)
-            remaining_seats_after_transfer = target_role['numberOfSeats'] - len(target_users)
-            row_cells[4].text = str(remaining_seats_after_transfer)
+        for license_type, target_users in target_users_by_license.items():
+            if license_type not in source_users_by_license:
+                row_cells = table.add_row().cells
+                row_cells[0].text = license_type
+                row_cells[1].text = '0'
+                row_cells[2].text = str(len(target_users))
+                row_cells[3].text = '0'
+                target_role = next(role for role in target_application_roles if role['name'] == license_type)
+                remaining_seats_after_transfer = target_role['numberOfSeats'] - len(target_users)
+                row_cells[4].text = str(remaining_seats_after_transfer)
+            pbar.update(1)
 
 
 # Function to analyze and add sections for all required entities
@@ -779,6 +753,69 @@ def analyze_and_add_section(doc, title, source_data, target_data, key_attr):
         row_cells[0].text = merge_name
         row_cells[1].text = merge_description
 
+# Function to add sections for selected plugins
+def add_plugins_section(doc, selected_plugins):
+    for plugin in selected_plugins:
+        doc.add_heading(plugin, level=1)
+        doc.add_paragraph(f"Details about {plugin} plugin...")  # Customize this as needed
+
+
+# Define endpoints for required data
+endpoints = {
+    'projects': '/rest/api/3/project?expand=description,lead',
+    'priorities': '/rest/api/3/priority',
+    'resolutions': '/rest/api/3/resolution',
+    'roles': '/rest/api/3/role',
+    'issuetypes': '/rest/api/3/issuetype',
+    'customfields': '/rest/api/3/field',
+    'statuses': '/rest/api/3/status',
+}
+
+# Define available apps
+available_apps = [
+    'Tempo Timesheets',
+    'ScriptRunner for Jira',
+    'Jira Misc Workflow Extensions (JMWE)',
+    'Xray - Test Management for Jira',
+    'Insight - Asset Management',
+    'Zephyr Scale - Test Management',
+    'BigPicture - Project Management & PPM',
+    'Structure - Project Management at Scale',
+]
+
+# Prompt the user to select apps
+questions = [
+    inquirer.Checkbox(
+        'apps',
+        message="Select the Jira apps you want to include in the report",
+        choices=available_apps,
+    ),
+]
+
+answers = inquirer.prompt(questions)
+selected_apps = answers.get('apps', [])
+ 
+# Fetch data from both instances with progress bars
+data_source = {key: get_jira_data(source_config, endpoint, f"Fetching {key} from source") for key, endpoint in endpoints.items()}
+data_target = {key: get_jira_data(target_config, endpoint, f"Fetching {key} from target") for key, endpoint in endpoints.items()}
+
+# Fetch filters and dashboards with pagination and progress bars
+data_source['filters'] = search_filters(source_config, 'Fetching filters from source')
+data_target['filters'] = search_filters(target_config, 'Fetching filters from target')
+data_source['dashboards'] = search_dashboards(source_config, 'Fetching dashboards from source')
+data_target['dashboards'] = search_dashboards(target_config, 'Fetching dashboards from target')
+
+# Fetch notification schemes with pagination and progress bars
+notification_schemes_source = get_notification_schemes(source_config, 'Fetching notification schemes from source')
+notification_schemes_target = get_notification_schemes(target_config, 'Fetching notification schemes from target')
+
+# Fetch application roles (licenses)
+application_roles_source = get_application_roles(source_config)
+application_roles_target = get_application_roles(target_config)
+
+# Create a new Document
+doc = Document()
+
 # Add sections for all required entities with error handling
 sections = [
     ('Projects', 'projects', 'key'),
@@ -791,7 +828,8 @@ sections = [
     ('Licenses', 'licenses', 'name'),
     ('Custom Fields', 'customfields', 'name'),
     ('Statuses', 'statuses', 'name'),
-    ('Notification Schemes', 'notification_schemes', 'name')
+    ('Notification Schemes', 'notification_schemes', 'name'),
+    ('Apps', 'apps', 'name')
 ]
 
 for title, key, attr in sections:
@@ -836,6 +874,11 @@ for title, key, attr in sections:
                 add_notification_schemes_section(doc, notification_schemes_source, notification_schemes_target, data_source['projects'], source_config)
             except Exception as e:
                 logging.error(f"Failed to analyze {title}: {e}")
+        elif title == 'Apps':
+            try:
+                add_plugins_section(doc, selected_apps)
+            except Exception as e:
+                logging.error(f"Failed to analyze {title}: {e}")
         else:
             try:
                 analyze_and_add_section(doc, title, data_source[key], data_target[key], attr)
@@ -844,7 +887,7 @@ for title, key, attr in sections:
     except Exception as e:
         logging.error(f"Failed to process {title}: {e}")
 
-# Save the document
-doc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jira_analysis.docx')
-doc.save(doc_path)
-logging.info(f"Document saved to {doc_path}")
+# Save the updated document with plugins sections
+doc_path_with_plugins = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jira_analysis.docx')
+doc.save(doc_path_with_plugins)
+logging.info(f"Document with plugins saved to {doc_path_with_plugins}")
